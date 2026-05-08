@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from app.models.base import Generation, User
 from app.models.token import TokenPayload
@@ -84,6 +84,28 @@ async def admin_list_users(
                 for u in rows
             ],
             "meta": {"total": total, "limit": limit, "offset": offset},
+        }
+
+
+@router.get("/filters")
+async def admin_filters(
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    with db_service.get_session() as session:
+        users = session.query(User).order_by(User.username.asc()).all()
+        models = (
+            session.query(func.distinct(Generation.model_name))
+            .filter(Generation.model_name.isnot(None))
+            .all()
+        )
+        provider_rows = session.query(Generation).order_by(Generation.created_at.desc()).limit(3000).all()
+        providers = sorted({p for p in (_infer_provider(g) for g in provider_rows) if p and p != "unknown"})
+        return {
+            "users": [{"id": u.id, "username": u.username} for u in users],
+            "models": sorted([m[0] for m in models if m and m[0]]),
+            "providers": providers,
+            "statuses": ["pending", "running", "paused", "completed", "failed"],
         }
 
 
@@ -191,6 +213,7 @@ async def admin_list_generations(
 async def admin_overview(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
     period_days: int = Query(30, ge=1, le=365),
+    user_id: Optional[int] = None,
 ):
     _require_admin(user)
     cutoff = datetime.utcnow() - timedelta(days=period_days)
@@ -204,11 +227,15 @@ async def admin_overview(
             .count()
         )
 
-        gens = session.query(Generation).filter(Generation.created_at >= cutoff).all()
+        gens_query = session.query(Generation).filter(Generation.created_at >= cutoff)
+        if user_id is not None:
+            gens_query = gens_query.filter(Generation.user_id == user_id)
+        gens = gens_query.all()
         generations_total = len(gens)
         failed_total = sum(1 for g in gens if g.status == "failed")
         completed_total = sum(1 for g in gens if g.status == "completed")
         running_total = sum(1 for g in gens if g.status in ("pending", "running", "paused"))
+        model_breakdown = {}
 
         spend_by_user = {}
         for g in gens:
@@ -224,6 +251,11 @@ async def admin_overview(
                 spend_by_user[g.user_id] = {"amount": 0.0, "fact": 0, "estimated": 0}
             spend_by_user[g.user_id]["amount"] += amount
             spend_by_user[g.user_id][source] += 1
+            model_key = g.model_name or "unknown"
+            if model_key not in model_breakdown:
+                model_breakdown[model_key] = {"count": 0, "amount_usd": 0.0}
+            model_breakdown[model_key]["count"] += 1
+            model_breakdown[model_key]["amount_usd"] += amount
 
         top_users = []
         if spend_by_user:
@@ -248,6 +280,7 @@ async def admin_overview(
 
         return {
             "period_days": period_days,
+            "user_id": user_id,
             "users_total": users_total,
             "active_users": active_users,
             "generations_total": generations_total,
@@ -257,5 +290,13 @@ async def admin_overview(
             "spend_total_usd": total_spend,
             "spend_source": "hybrid",
             "top_users": top_users,
+            "model_breakdown": [
+                {
+                    "model_name": k,
+                    "count": v["count"],
+                    "amount_usd": round(v["amount_usd"], 4),
+                }
+                for k, v in sorted(model_breakdown.items(), key=lambda item: item[1]["amount_usd"], reverse=True)
+            ],
         }
 

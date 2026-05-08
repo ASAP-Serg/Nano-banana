@@ -335,7 +335,11 @@
                     </div>
                     <div class="card-body">
                         <div class="row g-3 mb-3">
-                            <div class="col-md-2"><input class="form-control" id="adminFilterUserId" placeholder="User ID"></div>
+                            <div class="col-md-2">
+                                <select class="form-select" id="adminFilterUserId">
+                                    <option value="">Все пользователи</option>
+                                </select>
+                            </div>
                             <div class="col-md-2">
                                 <select class="form-select" id="adminFilterStatus">
                                     <option value="">Все статусы</option>
@@ -346,8 +350,23 @@
                                     <option value="failed">failed</option>
                                 </select>
                             </div>
-                            <div class="col-md-2"><input class="form-control" id="adminFilterModel" placeholder="Модель"></div>
+                            <div class="col-md-2">
+                                <select class="form-select" id="adminFilterModel">
+                                    <option value="">Все модели</option>
+                                </select>
+                            </div>
                             <div class="col-md-2"><input class="form-control" id="adminFilterSearch" placeholder="Поиск по промпту"></div>
+                            <div class="col-md-2">
+                                <select class="form-select" id="adminFilterProvider">
+                                    <option value="">Все провайдеры</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <select class="form-select" id="adminFilterErrorOnly">
+                                    <option value="">Любые</option>
+                                    <option value="true">Только с ошибками</option>
+                                </select>
+                            </div>
                             <div class="col-md-2"><input type="date" class="form-control" id="adminFilterFrom"></div>
                             <div class="col-md-2"><input type="date" class="form-control" id="adminFilterTo"></div>
                         </div>

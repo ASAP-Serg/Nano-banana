@@ -775,6 +775,7 @@ function showAdminPanel(show) {
     if (!panel) return;
     panel.style.display = adminPanelOpen ? 'flex' : 'none';
     if (adminPanelOpen) {
+        loadAdminFilterOptions();
         loadAdminOverview();
         loadAdminUsers();
         loadAdminGenerations();
@@ -797,7 +798,14 @@ async function loadAdminOverview() {
     const cards = document.getElementById('adminMetricsCards');
     if (!cards) return;
     try {
-        const data = await apiAdminGet('/overview?period_days=30');
+        const selectedUserId = document.getElementById('adminFilterUserId')?.value?.trim();
+        const query = selectedUserId
+            ? `/overview?period_days=30&user_id=${encodeURIComponent(selectedUserId)}`
+            : '/overview?period_days=30';
+        const data = await apiAdminGet(query);
+        const breakdown = (data.model_breakdown || []).slice(0, 4)
+            .map(item => `${item.model_name}: $${Number(item.amount_usd || 0).toFixed(2)}`)
+            .join(' | ');
         cards.innerHTML = `
             <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Пользователей</small><h5>${data.users_total || 0}</h5></div></div></div>
             <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Активных (30д)</small><h5>${data.active_users || 0}</h5></div></div></div>
@@ -805,9 +813,52 @@ async function loadAdminOverview() {
             <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Completed</small><h5>${data.completed_total || 0}</h5></div></div></div>
             <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Failed</small><h5>${data.failed_total || 0}</h5></div></div></div>
             <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Spend (USD)</small><h5>${Number(data.spend_total_usd || 0).toFixed(2)}</h5></div></div></div>
+            <div class="col-12"><div class="small text-muted">Модели: ${breakdown || 'нет данных'}</div></div>
         `;
     } catch (e) {
         cards.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось загрузить метрики: ${e.message}</div></div>`;
+    }
+}
+
+async function loadAdminFilterOptions() {
+    if (!currentUser?.is_admin) return;
+    try {
+        const data = await apiAdminGet('/filters');
+        const userSelect = document.getElementById('adminFilterUserId');
+        const modelSelect = document.getElementById('adminFilterModel');
+        const providerSelect = document.getElementById('adminFilterProvider');
+
+        if (userSelect) {
+            userSelect.innerHTML = '<option value="">Все пользователи</option>';
+            (data.users || []).forEach(u => {
+                const option = document.createElement('option');
+                option.value = String(u.id);
+                option.textContent = `${u.username} (#${u.id})`;
+                userSelect.appendChild(option);
+            });
+        }
+
+        if (modelSelect) {
+            modelSelect.innerHTML = '<option value="">Все модели</option>';
+            (data.models || []).forEach(m => {
+                const option = document.createElement('option');
+                option.value = m;
+                option.textContent = m;
+                modelSelect.appendChild(option);
+            });
+        }
+
+        if (providerSelect) {
+            providerSelect.innerHTML = '<option value="">Все провайдеры</option>';
+            (data.providers || []).forEach(p => {
+                const option = document.createElement('option');
+                option.value = p;
+                option.textContent = p;
+                providerSelect.appendChild(option);
+            });
+        }
+    } catch (e) {
+        console.warn('[ADMIN] Ошибка загрузки фильтров:', e);
     }
 }
 
@@ -846,6 +897,8 @@ async function loadAdminGenerations() {
     const status = document.getElementById('adminFilterStatus')?.value?.trim();
     const model = document.getElementById('adminFilterModel')?.value?.trim();
     const search = document.getElementById('adminFilterSearch')?.value?.trim();
+    const provider = document.getElementById('adminFilterProvider')?.value?.trim();
+    const errorOnly = document.getElementById('adminFilterErrorOnly')?.value?.trim();
     const dateFrom = document.getElementById('adminFilterFrom')?.value;
     const dateTo = document.getElementById('adminFilterTo')?.value;
 
@@ -855,6 +908,8 @@ async function loadAdminGenerations() {
     if (status) params.set('status', status);
     if (model) params.set('model', model);
     if (search) params.set('search', search);
+    if (provider) params.set('provider', provider);
+    if (errorOnly) params.set('error_only', errorOnly);
     if (dateFrom) params.set('date_from', `${dateFrom}T00:00:00`);
     if (dateTo) params.set('date_to', `${dateTo}T23:59:59`);
 
@@ -1425,13 +1480,24 @@ function setupEventListeners() {
     }
     const adminApplyFiltersBtn = document.getElementById('adminApplyFiltersBtn');
     if (adminApplyFiltersBtn) {
-        adminApplyFiltersBtn.addEventListener('click', () => loadAdminGenerations());
+        adminApplyFiltersBtn.addEventListener('click', () => {
+            loadAdminOverview();
+            loadAdminGenerations();
+        });
     }
     const adminRefreshOverviewBtn = document.getElementById('adminRefreshOverviewBtn');
     if (adminRefreshOverviewBtn) {
         adminRefreshOverviewBtn.addEventListener('click', () => {
+            loadAdminFilterOptions();
             loadAdminOverview();
             loadAdminUsers();
+            loadAdminGenerations();
+        });
+    }
+    const adminFilterUserId = document.getElementById('adminFilterUserId');
+    if (adminFilterUserId) {
+        adminFilterUserId.addEventListener('change', () => {
+            loadAdminOverview();
             loadAdminGenerations();
         });
     }
