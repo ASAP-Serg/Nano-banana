@@ -10,6 +10,7 @@ from fastapi import Depends, HTTPException, status
 from app.config import settings
 from app.models.base import User        
 from app.models.token import TokenData, TokenPayload
+from app.services.DBService import db_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -107,14 +108,34 @@ class AuthService:
                 is_admin=payload.get("is_admin"),
             )
 
-            if not token_payload.username or not token_payload.user_id or not token_payload.is_active:
+            if not token_payload.username or not token_payload.user_id:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid token claims",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-
-            return token_payload
+            # Истина по ролям и активности берется из БД, чтобы изменения (grant/revoke)
+            # применялись сразу, без ожидания истечения JWT.
+            with db_service.get_session() as session:
+                db_user = session.query(User).filter(User.id == token_payload.user_id).first()
+                if not db_user:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="User not found",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+                if not db_user.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Аккаунт пользователя отключен",
+                    )
+                return TokenPayload(
+                    username=db_user.username,
+                    user_id=db_user.id,
+                    email=db_user.email,
+                    is_active=bool(db_user.is_active),
+                    is_admin=bool(db_user.is_admin),
+                )
 
         except JWTError as e:
             logger.warning(f"Token decode error: {e}")
