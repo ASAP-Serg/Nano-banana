@@ -39,6 +39,11 @@ paused_queue = deque()
 paused_queue_ids = set()
 paused_queue_lock = threading.Lock()
 paused_worker_started = False
+bananalab_runtime_state = {
+    "last_paused_at": None,
+    "last_paused_error": None,
+    "last_success_at": None,
+}
 
 
 def get_fallback_model(model_name: Optional[str]) -> Optional[str]:
@@ -57,6 +62,11 @@ def _is_paused_error(error_message: str) -> bool:
         or "model is paused" in lower_err
         or ("project or nanobanana" in lower_err and "try again later" in lower_err)
     )
+
+
+def _queue_size() -> int:
+    with paused_queue_lock:
+        return len(paused_queue)
 
 
 def enqueue_paused_generation(generation_id: int, user_id: int, request_data: dict, prioritize: bool = False):
@@ -281,6 +291,8 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                 return
             
             if result['success']:
+                if provider == "bananalab":
+                    bananalab_runtime_state["last_success_at"] = datetime.utcnow().isoformat()
                 if generation.generation_metadata and generation.generation_metadata.get("paused_request_data"):
                     generation.generation_metadata.pop("paused_request_data", None)
                 # Логируем что получили от ReplicateService
@@ -437,6 +449,9 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                     generation.generation_metadata["error"] = error_message
                     generation.generation_metadata["paused_at"] = datetime.utcnow().isoformat()
                     generation.generation_metadata["paused_request_data"] = paused_payload
+                    if provider == "bananalab":
+                        bananalab_runtime_state["last_paused_at"] = generation.generation_metadata["paused_at"]
+                        bananalab_runtime_state["last_paused_error"] = error_message
                     from sqlalchemy.orm.attributes import flag_modified
                     flag_modified(generation, "generation_metadata")
                     session.commit()
@@ -936,6 +951,69 @@ async def get_available_models():
         "default_model": ReplicateService.DEFAULT_MODEL,
         "bananalab_key_prefix": "nb_",
         "replicate_key_prefix_hint": "r8_",
+    }
+
+
+@router.get("/provider-status")
+async def get_provider_status(
+    request: Request,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+    model_name: Optional[str] = None,
+):
+    """
+    Статус доступности генерации для текущего провайдера (по ключу пользователя).
+    Нужен для UI-индикатора "можно генерировать / пауза".
+    """
+    _ = user, model_name
+    api_key = (request.headers.get("X-Generation-Api-Key") or "").strip()
+    provider = infer_image_api_provider(api_key) if api_key else "unknown"
+
+    queue_size = _queue_size()
+    last_paused_at = bananalab_runtime_state.get("last_paused_at")
+    last_success_at = bananalab_runtime_state.get("last_success_at")
+    last_paused_error = bananalab_runtime_state.get("last_paused_error")
+
+    if provider == "unknown":
+        return {
+            "provider": "unknown",
+            "state": "unknown",
+            "can_generate": False,
+            "message": "Введите API ключ, чтобы определить состояние провайдера.",
+            "paused_queue_size": queue_size,
+            "last_paused_at": last_paused_at,
+            "last_success_at": last_success_at,
+        }
+
+    if provider == "replicate":
+        return {
+            "provider": "replicate",
+            "state": "ok",
+            "can_generate": True,
+            "message": "Replicate: генерация доступна.",
+            "paused_queue_size": queue_size,
+            "last_paused_at": last_paused_at,
+            "last_success_at": last_success_at,
+        }
+
+    # Banana Lab: считаем paused, если есть paused-очередь и не было более свежего успеха
+    is_paused = False
+    if queue_size > 0 and last_paused_at:
+        if not last_success_at or str(last_success_at) < str(last_paused_at):
+            is_paused = True
+
+    return {
+        "provider": "bananalab",
+        "state": "paused" if is_paused else "ok",
+        "can_generate": not is_paused,
+        "message": (
+            f"BananaLab на паузе, задач в очереди: {queue_size}. Автоповтор включен."
+            if is_paused
+            else "BananaLab: генерация доступна."
+        ),
+        "paused_queue_size": queue_size,
+        "last_paused_at": last_paused_at,
+        "last_success_at": last_success_at,
+        "last_paused_error": last_paused_error,
     }
 
 @router.delete("/{generation_id}")

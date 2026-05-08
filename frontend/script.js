@@ -762,6 +762,46 @@ const registerForm = document.getElementById('registerForm');
 const apiKeyForm = document.getElementById('apiKeyForm');
 const notificationToast = new bootstrap.Toast(document.getElementById('notificationToast'));
 
+async function loadProviderStatus() {
+    const banner = document.getElementById('providerStateBanner');
+    const text = document.getElementById('providerStateText');
+    if (!banner || !text || !authToken) return;
+
+    const apiKey = getApiKey();
+    if (!apiKey) {
+        banner.style.display = 'block';
+        banner.className = 'alert alert-secondary py-2 px-3 mt-2 mb-0 small';
+        text.textContent = 'Ключ не задан: состояние провайдера неизвестно.';
+        return;
+    }
+
+    const modelName = document.getElementById('modelName')?.value || 'nano-banana-pro';
+    try {
+        const response = await fetch(`${API_URL}/images/provider-status?model_name=${encodeURIComponent(modelName)}`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'X-Generation-Api-Key': apiKey
+            }
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        banner.style.display = 'block';
+
+        if (data.state === 'paused') {
+            banner.className = 'alert alert-warning py-2 px-3 mt-2 mb-0 small';
+            text.textContent = `Провайдер на паузе. ${data.message || ''}`;
+        } else if (data.state === 'ok') {
+            banner.className = 'alert alert-success py-2 px-3 mt-2 mb-0 small';
+            text.textContent = data.message || 'Провайдер доступен, можно генерировать.';
+        } else {
+            banner.className = 'alert alert-secondary py-2 px-3 mt-2 mb-0 small';
+            text.textContent = data.message || 'Состояние провайдера неизвестно.';
+        }
+    } catch (error) {
+        console.warn('[PROVIDER_STATUS] Ошибка получения статуса провайдера:', error);
+    }
+}
+
 // Инициализация
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
@@ -802,11 +842,13 @@ document.addEventListener('DOMContentLoaded', () => {
         modelSelect.addEventListener('change', (e) => {
             setSelectedModel(e.target.value);
             updateParamsForModel();
+            loadProviderStatus();
             console.log('[MODEL] Модель изменена и сохранена:', e.target.value);
         });
     }
     updateParamsForModel();
     refreshModelSelectForCurrentKey();
+    loadProviderStatus();
     
     // Обновление галереи каждые 5 секунд (только если есть активные генерации)
     setInterval(async () => {
@@ -832,6 +874,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }, 5000);
+
+    // Отдельный цикл обновления состояния провайдера
+    setInterval(async () => {
+        if (authToken) {
+            await loadProviderStatus();
+        }
+    }, 8000);
 });
 
 // Настройка визуальных индикаторов соотношений сторон
@@ -1657,6 +1706,7 @@ async function handleApiKeySave(e) {
     
     checkApiKeyStatus();
     refreshModelSelectForCurrentKey();
+    loadProviderStatus();
 }
 
 // Удаление API ключа
@@ -1672,6 +1722,7 @@ async function handleApiKeyDelete() {
     }
     checkApiKeyStatus();
     refreshModelSelectForCurrentKey();
+    loadProviderStatus();
 }
 
 // Выход
