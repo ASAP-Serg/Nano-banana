@@ -761,6 +761,134 @@ const loginForm = document.getElementById('loginForm');
 const registerForm = document.getElementById('registerForm');
 const apiKeyForm = document.getElementById('apiKeyForm');
 const notificationToast = new bootstrap.Toast(document.getElementById('notificationToast'));
+let adminPanelOpen = false;
+
+function toggleAdminMenuVisibility() {
+    const adminMenuItem = document.getElementById('adminMenuItem');
+    if (!adminMenuItem) return;
+    adminMenuItem.style.display = currentUser?.is_admin ? 'block' : 'none';
+}
+
+function showAdminPanel(show) {
+    adminPanelOpen = !!show;
+    const panel = document.getElementById('adminPanelSection');
+    if (!panel) return;
+    panel.style.display = adminPanelOpen ? 'flex' : 'none';
+    if (adminPanelOpen) {
+        loadAdminOverview();
+        loadAdminUsers();
+        loadAdminGenerations();
+    }
+}
+
+async function apiAdminGet(path) {
+    const response = await fetch(`${API_URL}/admin${path}`, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.detail || `Admin API error ${response.status}`);
+    }
+    return response.json();
+}
+
+async function loadAdminOverview() {
+    if (!currentUser?.is_admin) return;
+    const cards = document.getElementById('adminMetricsCards');
+    if (!cards) return;
+    try {
+        const data = await apiAdminGet('/overview?period_days=30');
+        cards.innerHTML = `
+            <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Пользователей</small><h5>${data.users_total || 0}</h5></div></div></div>
+            <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Активных (30д)</small><h5>${data.active_users || 0}</h5></div></div></div>
+            <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Генераций</small><h5>${data.generations_total || 0}</h5></div></div></div>
+            <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Completed</small><h5>${data.completed_total || 0}</h5></div></div></div>
+            <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Failed</small><h5>${data.failed_total || 0}</h5></div></div></div>
+            <div class="col-md-2"><div class="card bg-dark h-100"><div class="card-body"><small>Spend (USD)</small><h5>${Number(data.spend_total_usd || 0).toFixed(2)}</h5></div></div></div>
+        `;
+    } catch (e) {
+        cards.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось загрузить метрики: ${e.message}</div></div>`;
+    }
+}
+
+async function loadAdminUsers() {
+    if (!currentUser?.is_admin) return;
+    const tbody = document.getElementById('adminUsersTableBody');
+    if (!tbody) return;
+    try {
+        const data = await apiAdminGet('/users?limit=100');
+        tbody.innerHTML = '';
+        (data.users || []).forEach(u => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${u.id}</td>
+                <td>${u.username || ''}</td>
+                <td>${u.email || ''}</td>
+                <td>${u.is_admin ? 'Да' : 'Нет'}</td>
+                <td>
+                    ${u.is_admin
+                        ? `<button class="btn btn-sm btn-outline-danger" data-admin-action="revoke" data-user-id="${u.id}">Снять админа</button>`
+                        : `<button class="btn btn-sm btn-outline-success" data-admin-action="grant" data-user-id="${u.id}">Назначить админа</button>`}
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="text-warning">Ошибка загрузки пользователей: ${e.message}</td></tr>`;
+    }
+}
+
+async function loadAdminGenerations() {
+    if (!currentUser?.is_admin) return;
+    const grid = document.getElementById('adminGenerationsGrid');
+    if (!grid) return;
+    const userId = document.getElementById('adminFilterUserId')?.value?.trim();
+    const status = document.getElementById('adminFilterStatus')?.value?.trim();
+    const model = document.getElementById('adminFilterModel')?.value?.trim();
+    const search = document.getElementById('adminFilterSearch')?.value?.trim();
+    const dateFrom = document.getElementById('adminFilterFrom')?.value;
+    const dateTo = document.getElementById('adminFilterTo')?.value;
+
+    const params = new URLSearchParams();
+    params.set('limit', '60');
+    if (userId) params.set('user_id', userId);
+    if (status) params.set('status', status);
+    if (model) params.set('model', model);
+    if (search) params.set('search', search);
+    if (dateFrom) params.set('date_from', `${dateFrom}T00:00:00`);
+    if (dateTo) params.set('date_to', `${dateTo}T23:59:59`);
+
+    try {
+        const data = await apiAdminGet(`/generations?${params.toString()}`);
+        grid.innerHTML = '';
+        const rows = data.generations || [];
+        if (!rows.length) {
+            grid.innerHTML = '<div class="col-12"><div class="alert alert-info">По фильтрам ничего не найдено</div></div>';
+            return;
+        }
+        rows.forEach(gen => {
+            const col = document.createElement('div');
+            col.className = 'col';
+            const safePrompt = (gen.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const safeError = (gen.error || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            col.innerHTML = `
+                <div class="card h-100 bg-dark border-secondary">
+                    ${gen.result_url ? `<img src="${gen.result_url}" class="card-img-top" style="height:170px;object-fit:cover;" alt="gen">` : ''}
+                    <div class="card-body">
+                        <div class="small text-muted mb-1">#${gen.id} | user ${gen.user_id}</div>
+                        <div class="badge bg-secondary mb-2">${gen.status}</div>
+                        <div class="small mb-2">${safePrompt}</div>
+                        <div class="small text-info">${gen.model_name || ''} | ${gen.provider || 'unknown'}</div>
+                        ${safeError ? `<div class="small text-danger mt-2">${safeError}</div>` : ''}
+                    </div>
+                </div>
+            `;
+            grid.appendChild(col);
+        });
+    } catch (e) {
+        grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Ошибка загрузки генераций: ${e.message}</div></div>`;
+    }
+}
 
 async function loadProviderStatus() {
     const banner = document.getElementById('providerStateBanner');
@@ -1020,6 +1148,7 @@ async function loadUserInfo() {
             currentUser = await response.json();
             console.log('[AUTH] Пользователь загружен:', currentUser.username);
             showUserMenu();
+            toggleAdminMenuVisibility();
             checkApiKeyStatus();
             // Загружаем галерею после успешной загрузки пользователя
             console.log('[AUTH] Загружаем галерею после успешной аутентификации...');
@@ -1029,6 +1158,8 @@ async function loadUserInfo() {
             clearStoredAuthToken();
             authToken = null;
             showLoginButton();
+            toggleAdminMenuVisibility();
+            showAdminPanel(false);
             const grid = document.getElementById('imageGrid');
             if (grid) {
                 grid.innerHTML = '<div class="col-12"><div class="alert alert-warning">Ошибка аутентификации. Войдите снова.</div></div>';
@@ -1281,6 +1412,56 @@ function setupEventListeners() {
 
     // Выход
     document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+    const openAdminBtn = document.getElementById('openAdminPanelBtn');
+    const closeAdminBtn = document.getElementById('closeAdminPanelBtn');
+    if (openAdminBtn) {
+        openAdminBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            showAdminPanel(true);
+        });
+    }
+    if (closeAdminBtn) {
+        closeAdminBtn.addEventListener('click', () => showAdminPanel(false));
+    }
+    const adminApplyFiltersBtn = document.getElementById('adminApplyFiltersBtn');
+    if (adminApplyFiltersBtn) {
+        adminApplyFiltersBtn.addEventListener('click', () => loadAdminGenerations());
+    }
+    const adminRefreshOverviewBtn = document.getElementById('adminRefreshOverviewBtn');
+    if (adminRefreshOverviewBtn) {
+        adminRefreshOverviewBtn.addEventListener('click', () => {
+            loadAdminOverview();
+            loadAdminUsers();
+            loadAdminGenerations();
+        });
+    }
+    const adminUsersTableBody = document.getElementById('adminUsersTableBody');
+    if (adminUsersTableBody) {
+        adminUsersTableBody.addEventListener('click', async (e) => {
+            const btn = e.target.closest('button[data-admin-action]');
+            if (!btn) return;
+            const action = btn.getAttribute('data-admin-action');
+            const targetUserId = btn.getAttribute('data-user-id');
+            if (!targetUserId) return;
+            try {
+                const endpoint = action === 'grant'
+                    ? `/admin/users/${targetUserId}/grant-admin`
+                    : `/admin/users/${targetUserId}/revoke-admin`;
+                const response = await fetch(`${API_URL}${endpoint}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Не удалось изменить роль');
+                }
+                await loadAdminUsers();
+                showToast('Роль пользователя обновлена', 'success');
+            } catch (err) {
+                showToast(`Ошибка: ${err.message}`, 'error');
+            }
+        });
+    }
 
     // Обновление галереи
     document.getElementById('refreshGallery').addEventListener('click', loadGallery);
@@ -1727,6 +1908,7 @@ function handleLogout() {
     authToken = null;
     currentUser = null;
     showLoginButton();
+    showAdminPanel(false);
     loadGallery();
     showToast('Выход выполнен', 'info');
 }
@@ -2412,6 +2594,8 @@ async function deleteGeneration(id) {
 function showLoginButton() {
     document.getElementById('loginBtn').style.display = 'block';
     document.getElementById('userMenu').style.display = 'none';
+    const adminMenuItem = document.getElementById('adminMenuItem');
+    if (adminMenuItem) adminMenuItem.style.display = 'none';
 }
 
 // Показ меню пользователя
@@ -2419,6 +2603,7 @@ function showUserMenu() {
     document.getElementById('loginBtn').style.display = 'none';
     document.getElementById('userMenu').style.display = 'block';
     document.getElementById('usernameDisplay').textContent = currentUser?.username || 'Пользователь';
+    toggleAdminMenuVisibility();
 }
 
 // Показ уведомления

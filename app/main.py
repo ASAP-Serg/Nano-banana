@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.requests import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from app.routers import images, auth, users
+from app.routers import images, auth, users, admin
 from app.services.DBService import db_service
 import logging
 import os
@@ -410,6 +410,7 @@ async def api_info():
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(images.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 
 # Статические файлы (frontend) - монтируем после роутов
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

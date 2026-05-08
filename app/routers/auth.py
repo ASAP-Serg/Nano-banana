@@ -38,6 +38,7 @@ def _rate_limit_login(identifier: str):
 async def register(user_data: UserCreateRequest):
     """Регистрация нового пользователя"""
     with db_service.get_session() as session:
+        users_count = session.query(User).count()
         existing_user = session.query(User).filter(
             or_(
                 User.username == user_data.username,
@@ -57,7 +58,7 @@ async def register(user_data: UserCreateRequest):
             email=user_data.email,
             hashed_password=hashed_password,
             is_active=True,
-            is_admin=False,
+            is_admin=(users_count == 0),
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
             last_login=datetime.utcnow()
