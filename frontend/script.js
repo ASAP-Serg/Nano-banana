@@ -926,15 +926,44 @@ async function loadAdminGenerations() {
             col.className = 'col';
             const safePrompt = (gen.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             const safeError = (gen.error || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const statusBg = gen.status === 'completed'
+                ? 'linear-gradient(135deg, rgba(74, 85, 104, 0.7) 0%, rgba(72, 187, 120, 0.5) 100%)'
+                : gen.status === 'failed'
+                    ? 'linear-gradient(135deg, rgba(74, 85, 104, 0.7) 0%, rgba(229, 62, 62, 0.5) 100%)'
+                    : gen.status === 'paused'
+                        ? 'linear-gradient(135deg, rgba(74, 85, 104, 0.7) 0%, rgba(246, 173, 85, 0.6) 100%)'
+                        : 'linear-gradient(135deg, rgba(74, 85, 104, 0.7) 0%, rgba(102, 126, 234, 0.5) 100%)';
+            const statusBorder = gen.status === 'completed'
+                ? 'rgba(72, 187, 120, 0.6)'
+                : gen.status === 'failed'
+                    ? 'rgba(229, 62, 62, 0.6)'
+                    : gen.status === 'paused'
+                        ? 'rgba(246, 173, 85, 0.7)'
+                        : 'rgba(102, 126, 234, 0.6)';
+            const statusText = gen.status === 'completed'
+                ? 'Завершено'
+                : gen.status === 'running'
+                    ? 'Генерируется'
+                    : gen.status === 'pending'
+                        ? 'В очереди'
+                        : gen.status === 'paused'
+                            ? 'Пауза модели'
+                            : 'Ошибка';
+            const imageBlock = gen.result_url
+                ? `<img src="${gen.result_url}" class="card-img-top generation-image" style="height: 350px; width: 100%; object-fit: cover; position: absolute; inset: 0; z-index: 1; border-radius: 0 0 12px 12px;" alt="gen">`
+                : `<div class="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center" style="z-index: 1; background: linear-gradient(135deg, #1a1a2e 0%, #252547 100%); border-radius: 0 0 12px 12px;"><div class="text-center"><i class="fas fa-image text-muted" style="font-size: 2.2rem;"></i><p class="mt-2 mb-0 text-light small">${statusText}</p></div></div>`;
             col.innerHTML = `
-                <div class="card h-100 bg-dark border-secondary">
-                    ${gen.result_url ? `<img src="${gen.result_url}" class="card-img-top" style="height:170px;object-fit:cover;" alt="gen">` : ''}
-                    <div class="card-body">
-                        <div class="small text-muted mb-1">#${gen.id} | user ${gen.user_id}</div>
-                        <div class="badge bg-secondary mb-2">${gen.status}</div>
-                        <div class="small mb-2">${safePrompt}</div>
-                        <div class="small text-info">${gen.model_name || ''} | ${gen.provider || 'unknown'}</div>
-                        ${safeError ? `<div class="small text-danger mt-2">${safeError}</div>` : ''}
+                <div class="card h-100 generation-card gallery-card-wrap" style="border-radius: 12px; overflow: hidden;">
+                    <div class="position-relative image-container" style="height: 350px; overflow: hidden !important; background: #1a1a2e; border-radius: 0 0 12px 12px !important; position: relative;">
+                        ${imageBlock}
+                        <div class="position-absolute top-0 end-0 m-2" style="z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem;">
+                            <button class="btn btn-sm generation-status-badge" disabled style="opacity: 1 !important; background: ${statusBg} !important; border: 1px solid ${statusBorder} !important; padding: 0.25rem 0.5rem; color: #ffffff !important; font-weight: 700; cursor: default;">${statusText}</button>
+                        </div>
+                        <div class="prompt-and-buttons-overlay position-absolute bottom-0 start-0 w-100" style="z-index: 5; background: linear-gradient(to top, rgba(0,0,0,0.52) 0%, rgba(0,0,0,0.32) 50%, rgba(0,0,0,0) 100%); padding: 1rem; border-radius: 0 0 12px 12px; backdrop-filter: blur(6px);">
+                            <p class="text-light mb-1 small prompt-text" style="font-size: 0.7225rem; line-height: 1.19; padding: 0.5rem; border-radius: 4px; max-width: 100%; overflow-x: auto; overflow-y: hidden; white-space: nowrap;">${safePrompt}</p>
+                            <div class="small text-info">#${gen.id} | user ${gen.user_id} | ${gen.model_name || ''} | ${gen.provider || 'unknown'}</div>
+                            ${safeError ? `<div class="small text-danger mt-2">${safeError}</div>` : ''}
+                        </div>
                     </div>
                 </div>
             `;
@@ -1238,9 +1267,11 @@ async function checkApiKeyStatus() {
         if (!response.ok) return;
         const data = await response.json();
         if (data.has_key) {
-            statusDiv.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i>API ключ сохранен на сервере (зашифрован)</span>';
+            const bananaState = data.has_bananalab_key ? 'есть' : 'нет';
+            const replicateState = data.has_replicate_key ? 'есть' : 'нет';
+            statusDiv.innerHTML = `<span class="text-success"><i class="fas fa-check-circle me-1"></i>Ключи сохранены: BananaLab — ${bananaState}, Replicate — ${replicateState}</span>`;
         } else {
-            statusDiv.innerHTML = '<span class="text-muted"><i class="fas fa-info-circle me-1"></i>API ключ не сохранен на сервере</span>';
+            statusDiv.innerHTML = '<span class="text-muted"><i class="fas fa-info-circle me-1"></i>Ключи на сервере не сохранены</span>';
         }
     } catch (e) {
         statusDiv.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Не удалось проверить статус API ключа</span>';
@@ -1899,35 +1930,54 @@ async function handleRegister(e) {
 // Сохранение API ключа
 async function handleApiKeySave(e) {
     e.preventDefault();
-    const apiKey = document.getElementById('apiKeyInput').value;
+    const bananaApiKey = document.getElementById('bananaApiKeyInput')?.value?.trim() || '';
+    const replicateApiKey = document.getElementById('replicateApiKeyInput')?.value?.trim() || '';
     if (!authToken) {
         showToast('Сначала выполните вход', 'error');
         return;
     }
-    if (!apiKey || !apiKey.trim()) {
-        showToast('Введите API ключ', 'error');
+    if (!bananaApiKey && !replicateApiKey) {
+        showToast('Введите хотя бы один API ключ', 'error');
         return;
     }
     try {
-        const saveResp = await fetch(`${API_URL}/users/api-key`, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ api_key: apiKey.trim() })
-        });
-        if (!saveResp.ok) {
-            throw new Error('Не удалось сохранить ключ на сервере');
+        if (bananaApiKey) {
+            const bananaResp = await fetch(`${API_URL}/users/api-key`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ api_key: bananaApiKey, provider: 'bananalab' })
+            });
+            if (!bananaResp.ok) {
+                throw new Error('Не удалось сохранить ключ Banana Lab');
+            }
         }
-        showToast('API ключ сохранен на сервере (зашифрован)', 'success');
+        if (replicateApiKey) {
+            const replicateResp = await fetch(`${API_URL}/users/api-key`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ api_key: replicateApiKey, provider: 'replicate' })
+            });
+            if (!replicateResp.ok) {
+                throw new Error('Не удалось сохранить ключ Replicate');
+            }
+        }
+        showToast('Ключи сохранены на сервере (зашифрованы)', 'success');
     } catch (serverErr) {
         console.warn('[API_KEY] Ошибка серверного сохранения ключа:', serverErr);
-        showToast('Ошибка сохранения ключа на сервере', 'error');
+        showToast(`Ошибка сохранения ключей: ${serverErr.message}`, 'error');
         return;
     }
     
-    document.getElementById('apiKeyInput').value = '';
+    const bananaInput = document.getElementById('bananaApiKeyInput');
+    const replicateInput = document.getElementById('replicateApiKeyInput');
+    if (bananaInput) bananaInput.value = '';
+    if (replicateInput) replicateInput.value = '';
     
     // Закрываем модальное окно
     const modal = bootstrap.Modal.getInstance(document.getElementById('apiKeyModal'));
@@ -1942,7 +1992,7 @@ async function handleApiKeySave(e) {
 
 // Удаление API ключа
 async function handleApiKeyDelete() {
-    if (!confirm('Удалить API ключ с сервера?')) return;
+    if (!confirm('Удалить все API ключи с сервера?')) return;
 
     // Удаляем ключ на сервере
     const removed = removeApiKey();
@@ -1959,7 +2009,7 @@ async function handleApiKeyDelete() {
         console.warn('[API_KEY] Ошибка удаления ключа на сервере:', serverErr);
     }
     if (removed) {
-        showToast('API ключ удален', 'success');
+        showToast('API ключи удалены', 'success');
     } else {
         showToast('Ошибка удаления ключа', 'error');
     }

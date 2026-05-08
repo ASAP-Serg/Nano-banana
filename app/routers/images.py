@@ -3,6 +3,7 @@
 """
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
+import json
 import threading
 import time
 from typing import Annotated, Optional, List, Dict, Any
@@ -206,6 +207,50 @@ def get_user_generation_api_key(user_id: int, api_key_from_request: Optional[str
         "API ключ не указан. Введите ключ Replicate (r8_…) или Banana Lab (nb_…) в настройках."
     )
 
+
+def _load_user_api_keys(user_id: int) -> Dict[str, str]:
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user_id).first()
+        encrypted_key = db_user.replicate_api_key if db_user else None
+    decrypted = CryptoService.decrypt(encrypted_key) if encrypted_key else None
+    if not decrypted:
+        return {"replicate": "", "bananalab": ""}
+    try:
+        parsed = json.loads(decrypted)
+        if isinstance(parsed, dict):
+            return {
+                "replicate": str(parsed.get("replicate") or "").strip(),
+                "bananalab": str(parsed.get("bananalab") or "").strip(),
+            }
+    except Exception:
+        pass
+    # Legacy-формат: в поле сохранен один ключ строкой.
+    key = str(decrypted).strip()
+    if not key:
+        return {"replicate": "", "bananalab": ""}
+    if infer_image_api_provider(key) == "bananalab":
+        return {"replicate": "", "bananalab": key}
+    return {"replicate": key, "bananalab": ""}
+
+
+def _select_api_key_for_model(user_id: int, model_name: Optional[str], api_key_from_request: Optional[str] = None) -> str:
+    if api_key_from_request and str(api_key_from_request).strip():
+        return str(api_key_from_request).strip()
+
+    keys = _load_user_api_keys(user_id)
+    replicate_key = keys.get("replicate") or ""
+    bananalab_key = keys.get("bananalab") or ""
+    model = (model_name or "").strip().lower()
+
+    # Приоритет BananaLab, но если модель там недоступна — fallback в Replicate.
+    if bananalab_key and (not model or model in SUPPORTED_BANANALAB_FRONTEND_MODELS):
+        return bananalab_key
+    if replicate_key:
+        return replicate_key
+    if bananalab_key:
+        return bananalab_key
+    raise ValueError("API ключи не найдены. Сохраните ключи Banana Lab и/или Replicate в настройках.")
+
 def process_generation_async(generation_id: int, user_id: int, request_data: dict):
     """Асинхронная обработка генерации"""
     started_at = datetime.utcnow()
@@ -220,17 +265,12 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
             generation.status = "running"
             session.commit()
             
-            # Получаем API ключ из request_data (передан в запросе)
-            # ВАЖНО: Ключи пользователей НЕ сохраняются в БД для безопасности
+            # Получаем API ключ из request_data (если передан вручную)
             api_key_from_request = request_data.get('api_key')
             if (not api_key_from_request or not str(api_key_from_request).strip()) and request_data.get("api_key_encrypted"):
                 api_key_from_request = _decrypt_api_key_for_resume(request_data.get("api_key_encrypted"))
             logger.info(f"[GENERATION] В process_generation_async: ключ из запроса: {'передан' if api_key_from_request else 'не передан'}")
-            if not api_key_from_request or not api_key_from_request.strip():
-                raise ValueError(
-                    "API ключ не указан. Введите ключ Replicate или Banana Lab в настройках."
-                )
-            api_key = get_user_generation_api_key(user_id, api_key_from_request)
+            api_key = _select_api_key_for_model(user_id, request_data.get("model_name"), api_key_from_request)
             provider = infer_image_api_provider(api_key)
             provider_label = "Banana Lab" if provider == "bananalab" else "Replicate"
 
@@ -607,12 +647,7 @@ async def generate_image(
     """
     try:
         logger.info(f"[GENERATION] API ключ из запроса: {'передан' if request.api_key else 'не передан'}")
-        if not request.api_key or not request.api_key.strip():
-            raise HTTPException(
-                status_code=400,
-                detail="API ключ не указан. Введите ключ Replicate (r8_…) или Banana Lab (nb_…) в настройках.",
-            )
-        api_key = get_user_generation_api_key(user.user_id, request.api_key)
+        api_key = _select_api_key_for_model(user.user_id, request.model_name, request.api_key)
         
         # Проверяем лимиты активных генераций по API ключу
         # Создаем хеш API ключа для группировки (первые 8 символов для идентификации)
@@ -990,11 +1025,16 @@ async def get_provider_status(
     Статус доступности генерации для текущего провайдера (по ключу пользователя).
     Нужен для UI-индикатора "можно генерировать / пауза".
     """
-    _ = request, model_name
-    with db_service.get_session() as session:
-        db_user = session.query(User).filter(User.id == user.user_id).first()
-        encrypted_key = db_user.replicate_api_key if db_user else None
-    api_key = CryptoService.decrypt(encrypted_key) if encrypted_key else None
+    _ = request
+    keys = _load_user_api_keys(user.user_id)
+    has_replicate_key = bool(keys.get("replicate"))
+    has_bananalab_key = bool(keys.get("bananalab"))
+    api_key = None
+    if has_replicate_key or has_bananalab_key:
+        try:
+            api_key = _select_api_key_for_model(user.user_id, model_name, None)
+        except Exception:
+            api_key = keys.get("bananalab") or keys.get("replicate")
     provider = infer_image_api_provider(api_key) if api_key else "unknown"
 
     queue_size = _queue_size()
@@ -1011,6 +1051,8 @@ async def get_provider_status(
             "paused_queue_size": queue_size,
             "last_paused_at": last_paused_at,
             "last_success_at": last_success_at,
+            "has_replicate_key": has_replicate_key,
+            "has_bananalab_key": has_bananalab_key,
         }
 
     if provider == "replicate":
@@ -1022,6 +1064,8 @@ async def get_provider_status(
             "paused_queue_size": queue_size,
             "last_paused_at": last_paused_at,
             "last_success_at": last_success_at,
+            "has_replicate_key": has_replicate_key,
+            "has_bananalab_key": has_bananalab_key,
         }
 
     # Banana Lab: считаем paused, если есть paused-очередь и не было более свежего успеха
@@ -1043,6 +1087,8 @@ async def get_provider_status(
         "last_paused_at": last_paused_at,
         "last_success_at": last_success_at,
         "last_paused_error": last_paused_error,
+        "has_replicate_key": has_replicate_key,
+        "has_bananalab_key": has_bananalab_key,
     }
 
 @router.delete("/{generation_id}")

@@ -38,10 +38,14 @@ class UserResponse(BaseModel):
 # API ключ провайдера (Replicate или Banana Lab), локально на клиенте
 class ReplicateApiKeyRequest(BaseModel):
     api_key: str
+    provider: Optional[str] = None
 
 class ReplicateApiKeyResponse(BaseModel):
     message: str
     has_key: bool
+    has_replicate_key: Optional[bool] = None
+    has_bananalab_key: Optional[bool] = None
+    selected_provider: Optional[str] = None
 
 # Генерация изображений
 class ImageGenerationRequest(BaseModel):

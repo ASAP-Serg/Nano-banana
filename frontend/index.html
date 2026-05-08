@@ -478,7 +478,7 @@
                 <div class="modal-body">
                     <div class="alert alert-warning">
                         <i class="fas fa-shield-alt me-2"></i>
-                        <strong>Важно:</strong> API ключ сохраняется локально в браузере и на сервере в <strong>зашифрованном виде</strong>.
+                        <strong>Важно:</strong> API ключи сохраняются на сервере в <strong>зашифрованном виде</strong>.
                         Это нужно для очереди автоповторов и возобновления после перезапуска сервера.
                     </div>
                     <div class="alert alert-info">
@@ -492,9 +492,14 @@
                     </div>
                     <form id="apiKeyForm">
                         <div class="mb-3">
-                            <label for="apiKeyInput" class="form-label">API ключ</label>
-                            <input type="password" class="form-control" id="apiKeyInput" placeholder="r8_... или nb_...">
-                            <small class="form-text text-muted">Replicate: <code>r8_</code> · Banana Lab: <code>nb_</code></small>
+                            <label for="bananaApiKeyInput" class="form-label">Banana Lab API ключ</label>
+                            <input type="password" class="form-control" id="bananaApiKeyInput" placeholder="nb_...">
+                            <small class="form-text text-muted">Приоритетный ключ для Nano Banana моделей</small>
+                        </div>
+                        <div class="mb-3">
+                            <label for="replicateApiKeyInput" class="form-label">Replicate API ключ</label>
+                            <input type="password" class="form-control" id="replicateApiKeyInput" placeholder="r8_...">
+                            <small class="form-text text-muted">Используется как fallback, если модель недоступна в Banana Lab</small>
                         </div>
                         <div class="d-flex gap-2">
                             <button type="submit" class="btn btn-warning flex-fill">
