@@ -403,8 +403,8 @@
                 <div class="modal-body">
                     <div class="alert alert-warning">
                         <i class="fas fa-shield-alt me-2"></i>
-                        <strong>Важно:</strong> API ключи <strong>НЕ сохраняются на сервере</strong> для вашей безопасности. 
-                        Ключ хранится только локально в браузере (sessionStorage) и удаляется при закрытии браузера.
+                        <strong>Важно:</strong> API ключ сохраняется локально в браузере и на сервере в <strong>зашифрованном виде</strong>.
+                        Это нужно для очереди автоповторов и возобновления после перезапуска сервера.
                     </div>
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
@@ -413,7 +413,7 @@
                         <br>
                         <strong>Banana Lab:</strong> ключ с префиксом <code>nb_</code> — кабинет
                         <a href="https://api.bananalab.pw/client" target="_blank" class="alert-link">api.bananalab.pw/client</a>.
-                        <br><small>Провайдер выбирается автоматически по префиксу ключа. Ключ не отправляется на наш сервер для хранения — только в запросе генерации.</small>
+                        <br><small>Провайдер выбирается автоматически по префиксу ключа. Ключ хранится на сервере в зашифрованном виде.</small>
                     </div>
                     <form id="apiKeyForm">
                         <div class="mb-3">

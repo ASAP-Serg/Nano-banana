@@ -4,14 +4,35 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from datetime import datetime
+import time
+import threading
 from sqlalchemy import or_
 from app.services.AuthService import auth_service
 from app.services.DBService import db_service
+from app.config import settings
 from app.models.schemas import UserCreateRequest, UserLoginRequest, UserResponse
 from app.models.base import User
 from app.models.token import Token, TokenPayload
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+_login_attempts = {}
+_login_lock = threading.Lock()
+
+
+def _rate_limit_login(identifier: str):
+    now = time.time()
+    window = settings.SECURITY_LOGIN_WINDOW_SECONDS
+    max_attempts = settings.SECURITY_LOGIN_MAX_ATTEMPTS
+    with _login_lock:
+        attempts = _login_attempts.get(identifier, [])
+        attempts = [ts for ts in attempts if now - ts <= window]
+        if len(attempts) >= max_attempts:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Слишком много попыток входа. Попробуйте позже.",
+            )
+        attempts.append(now)
+        _login_attempts[identifier] = attempts
 
 @router.post("/register", response_model=Token)
 async def register(user_data: UserCreateRequest):
@@ -58,6 +79,7 @@ async def register(user_data: UserCreateRequest):
 @router.post("/login", response_model=Token)
 async def login(user_data: UserLoginRequest):
     """Вход в систему"""
+    _rate_limit_login(user_data.username_or_email.strip().lower())
     with db_service.get_session() as session:
         user = session.query(User).filter(
             or_(

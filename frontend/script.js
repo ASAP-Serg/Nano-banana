@@ -7,6 +7,7 @@ let referenceImages = []; // Массив объектов {file, dataUrl, id}
 let aspectRatioAutoSelected = false; // Флаг для автоматического выбора Юзер1
 let galleryUpdateInProgress = false; // Флаг для предотвращения параллельных обновлений галереи
 let lastGalleryHash = null; // Хеш последнего состояния галереи для предотвращения ненужных обновлений
+let serverStoredProvider = 'unknown';
 
 // Модели Imagen: только описание, соотношение сторон, seed (без разрешения, шагов, guidance, негативного промпта, референсов)
 const IMAGEN_MODEL_IDS = ['imagen-4', 'imagen-4-fast', 'imagen-4-ultra'];
@@ -15,8 +16,7 @@ const IMAGEN_MODEL_IDS = ['imagen-4', 'imagen-4-fast', 'imagen-4-ultra'];
 const BANANALAB_UNSUPPORTED_MODEL_IDS = ['imagen-4', 'imagen-4-fast', 'imagen-4-ultra', 'gemini-2.5-flash-image'];
 
 function isBananalabKey() {
-    const k = getApiKey();
-    return !!(k && String(k).trim().startsWith('nb_'));
+    return serverStoredProvider === 'bananalab';
 }
 
 /** Для Banana Lab backend не принимает model в body: выбор модели в UI информационный. */
@@ -112,39 +112,39 @@ function getStorage() {
 }
 
 function getApiKey() {
-    const storage = getStorage();
-    if (!storage) return null;
-    try {
-        return storage.getItem('replicateApiKey');
-    } catch (e) {
-        console.error('[STORAGE] Ошибка чтения ключа:', e);
-        return null;
-    }
+    return null;
 }
 
 function setApiKey(key) {
-    const storage = getStorage();
-    if (!storage) {
-        console.error('[STORAGE] Хранилище недоступно, ключ не может быть сохранен');
-        return false;
-    }
-    try {
-        if (key) {
-            storage.setItem('replicateApiKey', key);
-            console.log('[STORAGE] API ключ сохранен в', storage === localStorage ? 'localStorage' : 'sessionStorage');
-        } else {
-            storage.removeItem('replicateApiKey');
-            console.log('[STORAGE] API ключ удален');
-        }
-        return true;
-    } catch (e) {
-        console.error('[STORAGE] Ошибка сохранения ключа:', e);
-        return false;
-    }
+    return true;
 }
 
 function removeApiKey() {
     return setApiKey(null);
+}
+
+function getStoredAuthToken() {
+    try {
+        return sessionStorage.getItem('authToken') || localStorage.getItem('authToken');
+    } catch (e) {
+        return localStorage.getItem('authToken');
+    }
+}
+
+function setStoredAuthToken(token) {
+    try {
+        sessionStorage.setItem('authToken', token);
+        localStorage.removeItem('authToken');
+    } catch (e) {
+        localStorage.setItem('authToken', token);
+    }
+}
+
+function clearStoredAuthToken() {
+    try {
+        sessionStorage.removeItem('authToken');
+    } catch (e) {}
+    localStorage.removeItem('authToken');
 }
 
 // Функции для работы с выбранной моделью
@@ -767,24 +767,16 @@ async function loadProviderStatus() {
     const text = document.getElementById('providerStateText');
     if (!banner || !text || !authToken) return;
 
-    const apiKey = getApiKey();
-    if (!apiKey) {
-        banner.style.display = 'block';
-        banner.className = 'alert alert-secondary py-2 px-3 mt-2 mb-0 small';
-        text.textContent = 'Ключ не задан: состояние провайдера неизвестно.';
-        return;
-    }
-
     const modelName = document.getElementById('modelName')?.value || 'nano-banana-pro';
     try {
         const response = await fetch(`${API_URL}/images/provider-status?model_name=${encodeURIComponent(modelName)}`, {
             headers: {
-                'Authorization': `Bearer ${authToken}`,
-                'X-Generation-Api-Key': apiKey
+                'Authorization': `Bearer ${authToken}`
             }
         });
         if (!response.ok) return;
         const data = await response.json();
+        serverStoredProvider = data.provider || 'unknown';
         banner.style.display = 'block';
 
         if (data.state === 'paused') {
@@ -1002,7 +994,7 @@ function selectAspectRatio(value) {
 
 // Проверка аутентификации
 function checkAuth() {
-    authToken = localStorage.getItem('authToken');
+    authToken = getStoredAuthToken();
     if (authToken) {
         // Загружаем информацию о пользователе, которая затем загрузит галерею
         loadUserInfo();
@@ -1034,7 +1026,7 @@ async function loadUserInfo() {
             await loadGallery();
         } else {
             console.error('[AUTH] Ошибка загрузки пользователя, статус:', response.status);
-            localStorage.removeItem('authToken');
+            clearStoredAuthToken();
             authToken = null;
             showLoginButton();
             const grid = document.getElementById('imageGrid');
@@ -1049,22 +1041,23 @@ async function loadUserInfo() {
 
 // Проверка статуса API ключа
 async function checkApiKeyStatus() {
-    // ВАЖНО: Ключи НЕ сохраняются на сервере, проверяем только локально
-    const apiKey = getApiKey();
     const statusDiv = document.getElementById('apiKeyStatus');
-    const storage = getStorage();
-    const storageType = storage === localStorage ? 'localStorage' : (storage === sessionStorage ? 'sessionStorage' : 'недоступно');
-    
-    if (statusDiv) {
-        if (apiKey) {
-            statusDiv.innerHTML = `<span class="text-success"><i class="fas fa-check-circle me-1"></i>API ключ сохранен локально (${storageType}, не на сервере)</span>`;
-        } else {
-            if (!storage) {
-                statusDiv.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Хранилище недоступно. Ключ не может быть сохранен. Проверьте настройки браузера.</span>';
-            } else {
-                statusDiv.innerHTML = '<span class="text-muted"><i class="fas fa-info-circle me-1"></i>API ключ не сохранен. Ключи не хранятся на сервере для вашей безопасности.</span>';
+    if (!statusDiv || !authToken) return;
+    try {
+        const response = await fetch(`${API_URL}/users/api-key`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
             }
+        });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data.has_key) {
+            statusDiv.innerHTML = '<span class="text-success"><i class="fas fa-check-circle me-1"></i>API ключ сохранен на сервере (зашифрован)</span>';
+        } else {
+            statusDiv.innerHTML = '<span class="text-muted"><i class="fas fa-info-circle me-1"></i>API ключ не сохранен на сервере</span>';
         }
+    } catch (e) {
+        statusDiv.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Не удалось проверить статус API ключа</span>';
     }
 }
 
@@ -1392,21 +1385,8 @@ async function handleGenerate(e) {
             formData.reference_images = referenceImages.map(ref => ref.dataUrl);
         }
         
-        // Добавляем API ключ из хранилища (обязательно)
-        // ВАЖНО: Ключи НЕ сохраняются на сервере, передаются только в запросе
-        const apiKey = getApiKey();
-        if (!apiKey || apiKey.trim() === '') {
-            showToast('Ошибка: API ключ не введен. Укажите Replicate (r8_…) или Banana Lab (nb_…) в настройках.', 'error');
-            spinner.classList.add('d-none');
-            submitText.textContent = '🎨 Сгенерировать изображение';
-            sendButton.disabled = false;
-            return;
-        }
-        
-        formData.api_key = apiKey;
-        const storage = getStorage();
-        const storageType = storage === localStorage ? 'localStorage' : 'sessionStorage';
-        console.log(`[GENERATE] API ключ найден в ${storageType}, добавляем в запрос`);
+        // API ключ хранится на сервере в зашифрованном виде.
+        // formData.api_key передаем только если пользователь ввел новый ключ и еще не сохранил.
 
         // Отправка запроса
         const response = await fetch(`${API_URL}/images/generate`, {
@@ -1588,7 +1568,7 @@ async function handleLogin(e) {
 
         const data = await response.json();
         authToken = data.access_token;
-        localStorage.setItem('authToken', authToken);
+        setStoredAuthToken(authToken);
         
         bootstrap.Modal.getInstance(document.getElementById('loginModal')).hide();
         showToast('Вход выполнен успешно!', 'success');
@@ -1657,7 +1637,7 @@ async function handleRegister(e) {
 
         const data = await response.json();
         authToken = data.access_token;
-        localStorage.setItem('authToken', authToken);
+        setStoredAuthToken(authToken);
         
         bootstrap.Modal.getInstance(document.getElementById('registerModal')).hide();
         showToast('Регистрация успешна!', 'success');
@@ -1673,30 +1653,34 @@ async function handleRegister(e) {
 async function handleApiKeySave(e) {
     e.preventDefault();
     const apiKey = document.getElementById('apiKeyInput').value;
-
-    // ВАЖНО: Ключи НЕ сохраняются на сервере для безопасности
-    // Сохраняем локально в localStorage (более надежно на мобильных устройствах)
-    const storage = getStorage();
-    if (!storage) {
-        showToast('Ошибка: хранилище недоступно. Проверьте настройки браузера (приватный режим может блокировать сохранение)', 'error');
+    if (!authToken) {
+        showToast('Сначала выполните вход', 'error');
+        return;
+    }
+    if (!apiKey || !apiKey.trim()) {
+        showToast('Введите API ключ', 'error');
+        return;
+    }
+    try {
+        const saveResp = await fetch(`${API_URL}/users/api-key`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ api_key: apiKey.trim() })
+        });
+        if (!saveResp.ok) {
+            throw new Error('Не удалось сохранить ключ на сервере');
+        }
+        showToast('API ключ сохранен на сервере (зашифрован)', 'success');
+    } catch (serverErr) {
+        console.warn('[API_KEY] Ошибка серверного сохранения ключа:', serverErr);
+        showToast('Ошибка сохранения ключа на сервере', 'error');
         return;
     }
     
-    const storageType = storage === localStorage ? 'localStorage' : 'sessionStorage';
-    const saved = setApiKey(apiKey);
-    
-    if (saved) {
-        if (apiKey) {
-            showToast(`API ключ сохранен локально в ${storageType} (не сохраняется на сервере для вашей безопасности)`, 'success');
-        } else {
-            showToast('API ключ удален', 'info');
-        }
-    } else {
-        showToast('Ошибка сохранения ключа. Проверьте настройки браузера.', 'error');
-    }
-    
-    // НЕ очищаем поле ввода - пользователь должен видеть что ключ сохранен
-    // document.getElementById('apiKeyInput').value = '';
+    document.getElementById('apiKeyInput').value = '';
     
     // Закрываем модальное окно
     const modal = bootstrap.Modal.getInstance(document.getElementById('apiKeyModal'));
@@ -1711,12 +1695,24 @@ async function handleApiKeySave(e) {
 
 // Удаление API ключа
 async function handleApiKeyDelete() {
-    if (!confirm('Удалить API ключ из локального хранилища?')) return;
+    if (!confirm('Удалить API ключ с сервера?')) return;
 
-    // ВАЖНО: Ключи НЕ сохраняются на сервере, удаляем только локально
+    // Удаляем ключ на сервере
     const removed = removeApiKey();
+    try {
+        if (authToken) {
+            await fetch(`${API_URL}/users/api-key`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${authToken}`
+                }
+            });
+        }
+    } catch (serverErr) {
+        console.warn('[API_KEY] Ошибка удаления ключа на сервере:', serverErr);
+    }
     if (removed) {
-        showToast('API ключ удален из локального хранилища', 'success');
+        showToast('API ключ удален', 'success');
     } else {
         showToast('Ошибка удаления ключа', 'error');
     }
@@ -1727,7 +1723,7 @@ async function handleApiKeyDelete() {
 
 // Выход
 function handleLogout() {
-    localStorage.removeItem('authToken');
+    clearStoredAuthToken();
     authToken = null;
     currentUser = null;
     showLoginButton();
@@ -1751,7 +1747,7 @@ async function loadGallery() {
     
     // Проверяем токен еще раз (на случай если он был удален)
     if (!authToken) {
-        authToken = localStorage.getItem('authToken');
+        authToken = getStoredAuthToken();
     }
     
     if (!authToken) {
@@ -1798,7 +1794,7 @@ async function loadGallery() {
             } else if (response.status === 401) {
                 // Неавторизован - очищаем токен и показываем форму входа
                 console.warn('[GALLERY] Токен недействителен, очищаем и показываем форму входа');
-                localStorage.removeItem('authToken');
+                clearStoredAuthToken();
                 authToken = null;
                 showLoginButton();
                 grid.innerHTML = '<div class="col-12"><div class="alert alert-info">Сессия истекла. Войдите снова.</div></div>';

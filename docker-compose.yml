@@ -41,8 +41,8 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin123}
       MINIO_BROWSER_REDIRECT_URL: ${MINIO_CONSOLE_URL:-http://localhost:9001}
     ports:
-      - "9000:9000"  # API
-      - "9001:9001"  # Console
+      - "127.0.0.1:9000:9000"  # API (локально на сервере)
+      - "127.0.0.1:9001:9001"  # Console (локально на сервере)
     volumes:
       - minio_data:/data
     healthcheck:
@@ -78,13 +78,14 @@ services:
     image: adminer:latest
     container_name: nano_banana_adminer
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     networks:
       - nano_banana_network
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    profiles: ["debug"]
 
   # FastAPI приложение
   api:

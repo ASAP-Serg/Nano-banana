@@ -17,11 +17,28 @@ import os
 from logging.handlers import RotatingFileHandler
 from app.services.ErrorLogger import get_logs_dir, save_error_to_file
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import List
 from app.models.base import Generation
 from app.services.MinioService import MinioService
 from app.config import settings as app_settings
+
+SENSITIVE_KEYS = {"api_key", "authorization", "x-generation-api-key", "replicate_api_key", "password", "token"}
+
+
+def _redact_sensitive(value):
+    if isinstance(value, dict):
+        sanitized = {}
+        for k, v in value.items():
+            if str(k).lower() in SENSITIVE_KEYS:
+                sanitized[k] = "***REDACTED***"
+            else:
+                sanitized[k] = _redact_sensitive(v)
+        return sanitized
+    if isinstance(value, list):
+        return [_redact_sensitive(v) for v in value]
+    return value
 
 # Создаем папки для логов если их нет
 logs_dir = get_logs_dir()
@@ -92,16 +109,36 @@ class CSPMiddleware(BaseHTTPMiddleware):
         
         # Для продакшена используйте более строгую политику
         # ВАЖНО: Настройте CSP для вашего домена в продакшене
-        csp_policy = (
-            f"default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: {api_url}; "
-            f"img-src 'self' data: blob: {minio_url} https://replicate.delivery https://*.replicate.delivery http://* https://*; "
-            f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-            f"style-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com http://* https://*; "
-            f"font-src 'self' data: {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com http://* https://*; "
-            f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com http://* https://*; "
-            f"frame-src 'self' {minio_console_url};"
-        )
+        if app_settings.SECURITY_STRICT_CSP:
+            csp_policy = (
+                f"default-src 'self'; "
+                f"img-src 'self' data: blob: {minio_url} https://replicate.delivery https://*.replicate.delivery; "
+                f"script-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"style-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw; "
+                f"frame-src 'self' {minio_console_url}; "
+                f"object-src 'none'; "
+                f"base-uri 'self'; "
+                f"frame-ancestors 'self';"
+            )
+        else:
+            csp_policy = (
+                f"default-src 'self' 'unsafe-inline' data: blob: {api_url}; "
+                f"img-src 'self' data: blob: {minio_url} https://replicate.delivery https://*.replicate.delivery; "
+                f"script-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"style-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"font-src 'self' data: {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw; "
+                f"frame-src 'self' {minio_console_url};"
+            )
         response.headers["Content-Security-Policy"] = csp_policy
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if app_settings.SECURITY_ENABLE_HSTS:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         return response
 
 # Добавляем CSP middleware (после CORS)
@@ -123,12 +160,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     try:
         body = await request.body()
         if body:
-            error_data["request_body"] = body.decode('utf-8', errors='ignore')[:1000]  # Ограничиваем размер
+            body_str = body.decode('utf-8', errors='ignore')[:1000]
+            try:
+                parsed = json.loads(body_str)
+                error_data["request_body"] = _redact_sensitive(parsed)
+            except Exception:
+                error_data["request_body"] = "<non-json-body-redacted>"
     except:
         pass
     
     logger.error(f"[VALIDATION] Ошибка валидации для {request.method} {request.url}")
-    logger.error(f"[VALIDATION] Детали ошибки: {exc.errors()}")
+    logger.error(f"[VALIDATION] Детали ошибки: {_redact_sensitive({'errors': exc.errors()})['errors']}")
     
     # Сохраняем в файл ошибок
     save_error_to_file(error_data)
@@ -142,14 +184,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """Глобальный обработчик всех исключений"""
-    error_data = {
+    error_data = _redact_sensitive({
         "type": "unhandled_exception",
         "method": request.method,
         "url": str(request.url),
         "error": str(exc),
         "error_type": type(exc).__name__,
         "path": str(request.url.path),
-    }
+    })
     
     logger.error(f"[GLOBAL_ERROR] Необработанное исключение: {exc}", exc_info=True)
     

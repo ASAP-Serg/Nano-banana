@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.models.schemas import ReplicateApiKeyRequest, ReplicateApiKeyResponse, UserResponse
 from app.services.DBService import db_service
 from app.services.AuthService import auth_service
+from app.services.CryptoService import CryptoService
 from app.models.base import User
 from app.models.token import TokenPayload
 import logging
@@ -20,15 +21,23 @@ async def set_replicate_api_key(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]
 ):
     """
-    ВАЖНО: API ключи НЕ сохраняются в БД для безопасности.
-    Ключ используется только в текущей сессии пользователя.
-    Пользователь должен вводить ключ при каждом использовании или хранить его локально.
+    Сохраняет API ключ пользователя в БД в зашифрованном виде.
     """
-    # Ключи НЕ сохраняются в БД - возвращаем только подтверждение
-    logger.info(f"[USER] API ключ получен для пользователя {user.user_id} (не сохраняется в БД)")
-    
+    api_key = (request.api_key or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API ключ пустой")
+
+    encrypted_key = CryptoService.encrypt(api_key)
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        db_user.replicate_api_key = encrypted_key
+        session.commit()
+
+    logger.info(f"[USER] API ключ зашифрован и сохранен для пользователя {user.user_id}")
     return ReplicateApiKeyResponse(
-        message="API ключ принят (не сохраняется в БД для вашей безопасности)",
+        message="API ключ сохранен в зашифрованном виде",
         has_key=True
     )
 
@@ -37,12 +46,17 @@ async def get_replicate_api_key_status(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]
 ):
     """
-    ВАЖНО: API ключи НЕ сохраняются в БД.
-    Всегда возвращает has_key=False, так как ключи не хранятся на сервере.
+    Проверяет, сохранен ли API ключ пользователя на сервере.
     """
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        has_key = bool(db_user.replicate_api_key)
+
     return ReplicateApiKeyResponse(
-        message="API ключи не сохраняются на сервере для вашей безопасности",
-        has_key=False
+        message="API ключ сохранен на сервере (зашифрован)" if has_key else "API ключ на сервере не сохранен",
+        has_key=has_key
     )
 
 @router.delete("/api-key")
@@ -50,10 +64,16 @@ async def delete_replicate_api_key(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]
 ):
     """
-    ВАЖНО: API ключи НЕ сохраняются в БД, поэтому удалять нечего.
-    Ключ должен быть удален на стороне клиента (localStorage/sessionStorage).
+    Удаляет сохраненный API ключ пользователя из БД.
     """
-    logger.info(f"[USER] Запрос на удаление API ключа от пользователя {user.user_id} (ключи не хранятся в БД)")
-    return {"message": "API ключи не хранятся на сервере, удалите ключ на стороне клиента"}
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        db_user.replicate_api_key = None
+        session.commit()
+
+    logger.info(f"[USER] API ключ удален для пользователя {user.user_id}")
+    return {"message": "API ключ удален с сервера"}
 
 

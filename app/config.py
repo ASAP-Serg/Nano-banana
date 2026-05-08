@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     
     # CORS (для продакшена укажите конкретные домены)
     CORS_ORIGINS: str = Field("*", env="CORS_ORIGINS")
+
+    # Security hardening
+    SECURITY_STRICT_CSP: bool = Field(True, env="SECURITY_STRICT_CSP")
+    SECURITY_ENABLE_HSTS: bool = Field(True, env="SECURITY_ENABLE_HSTS")
+    SECURITY_LOGIN_MAX_ATTEMPTS: int = Field(10, env="SECURITY_LOGIN_MAX_ATTEMPTS")
+    SECURITY_LOGIN_WINDOW_SECONDS: int = Field(300, env="SECURITY_LOGIN_WINDOW_SECONDS")
     
     class Config:
         env_file = ".env"

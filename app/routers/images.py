@@ -11,6 +11,7 @@ from starlette.requests import Request
 from datetime import datetime, timedelta
 import logging
 import uuid
+from app.services.CryptoService import CryptoService
 from app.models.schemas import ImageGenerationRequest, ImageGenerationResponse, ImageResponse
 from app.services.ReplicateService import ReplicateService
 from app.services.BananalabService import BananalabService, SUPPORTED_BANANALAB_FRONTEND_MODELS
@@ -69,6 +70,18 @@ def _queue_size() -> int:
         return len(paused_queue)
 
 
+def _encrypt_api_key_for_resume(api_key: str) -> str:
+    if not api_key:
+        return ""
+    return CryptoService.encrypt(api_key)
+
+
+def _decrypt_api_key_for_resume(token: str) -> Optional[str]:
+    if not token:
+        return None
+    return CryptoService.decrypt(token)
+
+
 def enqueue_paused_generation(generation_id: int, user_id: int, request_data: dict, prioritize: bool = False):
     with paused_queue_lock:
         if generation_id in paused_queue_ids:
@@ -88,8 +101,10 @@ def enqueue_paused_generation(generation_id: int, user_id: int, request_data: di
 
 def _build_resume_payload(generation: Generation, request_data: dict) -> Dict[str, Any]:
     metadata = generation.generation_metadata or {}
+    plain_api_key = request_data.get("api_key")
     return {
-        "api_key": request_data.get("api_key"),
+        # В БД храним только шифрованную форму ключа для автовозобновления.
+        "api_key_encrypted": _encrypt_api_key_for_resume(plain_api_key) if plain_api_key else "",
         "prompt": request_data.get("prompt") or generation.prompt,
         "negative_prompt": request_data.get("negative_prompt") or generation.negative_prompt,
         "resolution": request_data.get("resolution") or generation.resolution,
@@ -113,7 +128,7 @@ def restore_paused_queue_from_db():
         for generation in paused_generations:
             metadata = generation.generation_metadata or {}
             request_data = metadata.get("paused_request_data")
-            if request_data and request_data.get("api_key"):
+            if request_data and (request_data.get("api_key_encrypted") or request_data.get("api_key")):
                 enqueue_paused_generation(generation.id, generation.user_id, request_data, prioritize=False)
 
 
@@ -176,11 +191,20 @@ def get_user_generation_api_key(user_id: int, api_key_from_request: Optional[str
     API ключ из запроса (Replicate r8_… или Banana Lab nb_…).
     Ключи не сохраняются в БД.
     """
-    if not api_key_from_request or not api_key_from_request.strip():
-        raise ValueError(
-            "API ключ не указан. Введите ключ Replicate (r8_…) или Banana Lab (nb_…) в настройках."
-        )
-    return api_key_from_request.strip()
+    if api_key_from_request and api_key_from_request.strip():
+        return api_key_from_request.strip()
+
+    # Fallback: безопасно достаем ключ пользователя из БД (зашифрованный)
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user_id).first()
+        encrypted_key = db_user.replicate_api_key if db_user else None
+    decrypted_key = CryptoService.decrypt(encrypted_key) if encrypted_key else None
+    if decrypted_key:
+        return decrypted_key
+
+    raise ValueError(
+        "API ключ не указан. Введите ключ Replicate (r8_…) или Banana Lab (nb_…) в настройках."
+    )
 
 def process_generation_async(generation_id: int, user_id: int, request_data: dict):
     """Асинхронная обработка генерации"""
@@ -199,6 +223,8 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
             # Получаем API ключ из request_data (передан в запросе)
             # ВАЖНО: Ключи пользователей НЕ сохраняются в БД для безопасности
             api_key_from_request = request_data.get('api_key')
+            if (not api_key_from_request or not str(api_key_from_request).strip()) and request_data.get("api_key_encrypted"):
+                api_key_from_request = _decrypt_api_key_for_resume(request_data.get("api_key_encrypted"))
             logger.info(f"[GENERATION] В process_generation_async: ключ из запроса: {'передан' if api_key_from_request else 'не передан'}")
             if not api_key_from_request or not api_key_from_request.strip():
                 raise ValueError(
@@ -964,8 +990,11 @@ async def get_provider_status(
     Статус доступности генерации для текущего провайдера (по ключу пользователя).
     Нужен для UI-индикатора "можно генерировать / пауза".
     """
-    _ = user, model_name
-    api_key = (request.headers.get("X-Generation-Api-Key") or "").strip()
+    _ = request, model_name
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        encrypted_key = db_user.replicate_api_key if db_user else None
+    api_key = CryptoService.decrypt(encrypted_key) if encrypted_key else None
     provider = infer_image_api_provider(api_key) if api_key else "unknown"
 
     queue_size = _queue_size()
