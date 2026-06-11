@@ -2,7 +2,7 @@
 Роутер для аутентификации
 """
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from datetime import datetime
 import time
 import threading
@@ -19,24 +19,40 @@ _login_attempts = {}
 _login_lock = threading.Lock()
 
 
-def _rate_limit_login(identifier: str):
+def _rate_limit_auth(scope: str, identifier: str, max_attempts: int, window_seconds: int, detail: str):
     now = time.time()
-    window = settings.SECURITY_LOGIN_WINDOW_SECONDS
-    max_attempts = settings.SECURITY_LOGIN_MAX_ATTEMPTS
+    key = f"{scope}:{identifier}"
     with _login_lock:
-        attempts = _login_attempts.get(identifier, [])
-        attempts = [ts for ts in attempts if now - ts <= window]
+        attempts = _login_attempts.get(key, [])
+        attempts = [ts for ts in attempts if now - ts <= window_seconds]
         if len(attempts) >= max_attempts:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Слишком много попыток входа. Попробуйте позже.",
+                detail=detail,
             )
         attempts.append(now)
-        _login_attempts[identifier] = attempts
+        _login_attempts[key] = attempts
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip().lower()
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
 
 @router.post("/register", response_model=Token)
-async def register(user_data: UserCreateRequest):
+async def register(user_data: UserCreateRequest, request: Request):
     """Регистрация нового пользователя"""
+    _rate_limit_auth(
+        "register",
+        _client_ip(request),
+        settings.SECURITY_REGISTER_MAX_ATTEMPTS,
+        settings.SECURITY_REGISTER_WINDOW_SECONDS,
+        "Слишком много попыток регистрации с этого адреса. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         users_count = session.query(User).count()
         existing_user = session.query(User).filter(
@@ -80,7 +96,13 @@ async def register(user_data: UserCreateRequest):
 @router.post("/login", response_model=Token)
 async def login(user_data: UserLoginRequest):
     """Вход в систему"""
-    _rate_limit_login(user_data.username_or_email.strip().lower())
+    _rate_limit_auth(
+        "login",
+        user_data.username_or_email.strip().lower(),
+        settings.SECURITY_LOGIN_MAX_ATTEMPTS,
+        settings.SECURITY_LOGIN_WINDOW_SECONDS,
+        "Слишком много попыток входа. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         user = session.query(User).filter(
             or_(

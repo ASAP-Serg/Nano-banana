@@ -25,6 +25,60 @@ class TestPrompt(unittest.TestCase):
         self.assertIn("STRICT INSTRUCTIONS", p)
 
 
+class TestSecurityHelpers(unittest.TestCase):
+    def test_generate_storage_object_name(self):
+        from app.security_helpers import generate_storage_object_name
+
+        name = generate_storage_object_name("results", "jpg")
+        self.assertTrue(name.startswith("images/results/"))
+        self.assertTrue(name.endswith(".jpg"))
+        self.assertEqual(len(name.split("/")[-1].split(".")[0]), 32)
+
+    def test_allowed_reference_url(self):
+        from app.config import Settings
+        from app.security_helpers import is_allowed_reference_url
+
+        s = Settings(
+            SECRET_KEY="x" * 64,
+            MINIO_PUBLIC_URL="https://storage.example.com",
+            MINIO_BUCKET="nano-banana-images",
+            API_URL="https://app.example.com",
+        )
+        ok = "https://storage.example.com/nano-banana-images/images/references/abc.jpg"
+        legacy = "https://storage.example.com/nano-banana-images/images/references/ref_20260101_120000_abcd.jpg"
+        bad = "https://evil.com/nano-banana-images/images/references/abc.jpg"
+        self.assertTrue(is_allowed_reference_url(ok, s))
+        self.assertTrue(is_allowed_reference_url(legacy, s))
+        self.assertFalse(is_allowed_reference_url(bad, s))
+
+    def test_localhost_reference_alias(self):
+        from app.config import Settings
+        from app.security_helpers import is_allowed_reference_url
+
+        s = Settings(
+            SECRET_KEY="x" * 64,
+            MINIO_PUBLIC_URL="http://localhost:9000",
+            MINIO_BUCKET="nano-banana-images",
+        )
+        url = "http://127.0.0.1:9000/nano-banana-images/images/results/deadbeef.jpg"
+        self.assertTrue(is_allowed_reference_url(url, s))
+
+
+class TestResultStorage(unittest.TestCase):
+    def test_persist_prefers_image_data(self):
+        from unittest.mock import MagicMock
+        from app.services.result_storage import persist_generation_result
+
+        minio = MagicMock()
+        minio.upload_image.return_value = {
+            "url": "http://localhost:9000/bucket/images/results/abc.jpg",
+            "path": "images/results/abc.jpg",
+        }
+        out = persist_generation_result(minio, {"image_data": b"x" * 600, "image_url": "https://evil.com/x.jpg"})
+        self.assertIsNotNone(out)
+        minio.upload_image.assert_called_once()
+
+
 class TestBanalabJobUrl(unittest.TestCase):
     def test_absolute_status_url_from_path(self):
         from app.services.bananalab_response import absolute_job_status_url

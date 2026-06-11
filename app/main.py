@@ -80,10 +80,16 @@ logger = logging.getLogger(__name__)
 # Глобальный сервис MinIO для фоновых задач
 minio_background = MinioService()
 
+_fastapi_docs = (
+    {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    if app_settings.SECURITY_DISABLE_OPENAPI
+    else {}
+)
 app = FastAPI(
     title="Nano Banana Pro API",
     description="API для генерации изображений через Nano Banana Pro (Replicate)",
-    version="1.0.0"
+    version="1.0.0",
+    **_fastapi_docs,
 )
 
 # CORS настройки (должен быть первым)
@@ -126,7 +132,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
                 f"script-src {script_src}; "
                 f"style-src {style_src}; "
                 f"font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-                f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw; "
+                f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw https://bananahub.io; "
                 f"frame-src {frame_src}; "
                 f"object-src 'none'; "
                 f"base-uri 'self'; "
@@ -139,7 +145,7 @@ class CSPMiddleware(BaseHTTPMiddleware):
                 f"script-src {script_src}; "
                 f"style-src {style_src}; "
                 f"font-src 'self' data: {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-                f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw; "
+                f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw https://bananahub.io; "
                 f"frame-src {frame_src};"
             )
         response.headers["Content-Security-Policy"] = csp_policy
@@ -147,7 +153,14 @@ class CSPMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        if app_settings.SECURITY_ENABLE_HSTS:
+        api_lower = (api_url or "").lower()
+        hsts_ok = (
+            app_settings.SECURITY_ENABLE_HSTS
+            and api_lower.startswith("https://")
+            and "localhost" not in api_lower
+            and "127.0.0.1" not in api_lower
+        )
+        if hsts_ok:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         return response
 

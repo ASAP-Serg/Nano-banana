@@ -415,35 +415,13 @@ class BananalabService:
                         "error": None,
                     }
                 if image_url:
-                    try:
-                        img_r = requests.get(image_url, timeout=60)
-                        if img_r.status_code != 200:
-                            logger.warning(
-                                "[BANANALAB] Скачивание результата HTTP %s: %s",
-                                img_r.status_code,
-                                _safe_response_body_for_log(img_r.text[:2000] if img_r.text else ""),
-                            )
-                        if img_r.status_code == 200:
-                            return {
-                                "success": True,
-                                "image_url": image_url,
-                                "image_data": img_r.content,
-                                "error": None,
-                            }
-                        return {
-                            "success": True,
-                            "image_url": image_url,
-                            "image_data": None,
-                            "error": None,
-                        }
-                    except Exception as dl_e:
-                        logger.warning("[BANANALAB] Не удалось скачать изображение: %s", dl_e)
-                        return {
-                            "success": True,
-                            "image_url": image_url,
-                            "image_data": None,
-                            "error": None,
-                        }
+                    # Скачивание и сохранение в MinIO — в persist_generation_result (один раз, с ретраями).
+                    return {
+                        "success": True,
+                        "image_url": image_url,
+                        "image_data": None,
+                        "error": None,
+                    }
 
                 logger.error(
                     "[BANANALAB] Не удалось извлечь изображение из ответа. Ключи верхнего уровня: %s",

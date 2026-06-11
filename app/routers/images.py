@@ -23,6 +23,8 @@ from app.services.AuthService import auth_service
 from app.models.base import Generation, User
 from app.config import settings
 from app.models.token import TokenPayload
+from app.security_helpers import generate_storage_object_name, is_allowed_reference_url
+from app.services.result_storage import persist_generation_result
 
 logger = logging.getLogger(__name__)
 
@@ -361,134 +363,34 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                     bananalab_runtime_state["last_success_at"] = datetime.utcnow().isoformat()
                 if generation.generation_metadata and generation.generation_metadata.get("paused_request_data"):
                     generation.generation_metadata.pop("paused_request_data", None)
-                # Логируем что получили от ReplicateService
-                logger.info(f"[GENERATION] Результат от ReplicateService: image_url={'есть' if result.get('image_url') else 'отсутствует'}, image_data={'есть' if result.get('image_data') else 'отсутствует'}")
-                # Сохраняем в MinIO если есть данные
-                if result['image_data']:
-                    try:
-                        # Проверяем размер изображения перед сохранением
-                        image_size = len(result['image_data'])
-                        logger.info(f"[GENERATION] Размер изображения: {image_size} байт")
-                        
-                        if image_size < 1024:  # Меньше 1KB - подозрительно
-                            logger.warning(f"[GENERATION] Подозрительно маленький размер изображения: {image_size} байт")
-                            # Проверяем что это действительно изображение
-                            try:
-                                from PIL import Image as PILImage
-                                import io as io_module
-                                img = PILImage.open(io_module.BytesIO(result['image_data']))
-                                img.verify()
-                                img = PILImage.open(io_module.BytesIO(result['image_data']))  # Пересоздаем после verify
-                                logger.info(f"[GENERATION] Изображение валидно: {img.format}, размер: {img.size}")
-                                # Если изображение валидно, но маленькое - возможно это миниатюра, продолжаем
-                            except Exception as img_error:
-                                logger.error(f"[GENERATION] Данные не являются валидным изображением: {img_error}")
-                                # Если не валидное изображение, пробуем загрузить полное изображение по URL от Replicate
-                                image_url = result.get('image_url')
-                                logger.info(f"[GENERATION] Проверка URL от Replicate: {image_url[:100] if image_url else 'URL отсутствует'}...")
-                                if image_url:
-                                    # Пробуем загрузить полное изображение по URL и сохранить в MinIO
-                                    try:
-                                        import requests as req_module
-                                        logger.info(f"[GENERATION] Загрузка полного изображения по URL от Replicate: {image_url[:100]}...")
-                                        img_response = req_module.get(image_url, timeout=30)
-                                        if img_response.status_code == 200:
-                                            full_image_data = img_response.content
-                                            logger.info(f"[GENERATION] Полное изображение загружено, размер: {len(full_image_data)} байт")
-                                            
-                                            # Проверяем, что это валидное изображение
-                                            try:
-                                                from PIL import Image as PILImage
-                                                import io as io_module
-                                                img = PILImage.open(io_module.BytesIO(full_image_data))
-                                                img.verify()
-                                                img = PILImage.open(io_module.BytesIO(full_image_data))
-                                                logger.info(f"[GENERATION] Полное изображение валидно: {img.format}, размер: {img.size}")
-                                                
-                                                # Сохраняем полное изображение в MinIO
-                                                filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.jpg"
-                                                logger.info(f"[GENERATION] Сохранение полного изображения в MinIO: {filename}")
-                                                upload_result = minio.upload_image(
-                                                    full_image_data,
-                                                    filename,
-                                                    "image/jpeg"
-                                                )
-                                                generation.result_url = upload_result['url']
-                                                generation.result_path = upload_result['path']
-                                                logger.info(f"[GENERATION] Полное изображение сохранено в MinIO, URL: {generation.result_url[:100]}...")
-                                                generation.status = "completed"
-                                                generation.completed_at = datetime.utcnow()
-                                                session.commit()
-                                                logger.info(f"[GENERATION] Генерация {generation.id} завершена с полным изображением из MinIO")
-                                                return
-                                            except Exception as full_img_error:
-                                                logger.error(f"[GENERATION] Полное изображение также невалидно: {full_img_error}")
-                                                # Используем URL от Replicate как fallback
-                                                generation.result_url = image_url
-                                                logger.warning(f"[GENERATION] Используется URL от Replicate как fallback: {generation.result_url[:100]}...")
-                                                generation.status = "completed"
-                                                generation.completed_at = datetime.utcnow()
-                                                session.commit()
-                                                logger.info(f"[GENERATION] Генерация {generation.id} завершена с URL от Replicate")
-                                                return
-                                        else:
-                                            logger.warning(f"[GENERATION] Не удалось загрузить полное изображение, статус: {img_response.status_code}")
-                                            # Используем URL от Replicate как fallback
-                                            generation.result_url = image_url
-                                            logger.warning(f"[GENERATION] Используется URL от Replicate как fallback: {generation.result_url[:100]}...")
-                                            generation.status = "completed"
-                                            generation.completed_at = datetime.utcnow()
-                                            session.commit()
-                                            logger.info(f"[GENERATION] Генерация {generation.id} завершена с URL от Replicate")
-                                            return
-                                    except Exception as download_error:
-                                        logger.error(f"[GENERATION] Ошибка загрузки полного изображения: {download_error}")
-                                        # Используем URL от Replicate как fallback
-                                        generation.result_url = image_url
-                                        logger.warning(f"[GENERATION] Используется URL от Replicate как fallback: {generation.result_url[:100]}...")
-                                        generation.status = "completed"
-                                        generation.completed_at = datetime.utcnow()
-                                        session.commit()
-                                        logger.info(f"[GENERATION] Генерация {generation.id} завершена с URL от Replicate")
-                                        return
-                                else:
-                                    # Нет валидного изображения и нет URL - ошибка
-                                    error_msg = f"Получены невалидные данные изображения: {image_size} байт, URL отсутствует"
-                                    logger.error(f"[GENERATION] {error_msg}")
-                                    generation.status = "failed"
-                                    generation.completed_at = datetime.utcnow()
-                                    if not generation.generation_metadata:
-                                        generation.generation_metadata = {}
-                                    generation.generation_metadata['error'] = error_msg
-                                    # ВАЖНО: Уведомляем SQLAlchemy об изменении JSON поля
-                                    from sqlalchemy.orm.attributes import flag_modified
-                                    flag_modified(generation, "generation_metadata")
-                                    session.commit()
-                                    logger.error(f"[GENERATION] Генерация {generation.id} завершена с ошибкой: {error_msg}")
-                                    return
-                        
-                        filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}.jpg"
-                        logger.info(f"[GENERATION] Сохранение изображения в MinIO: {filename}")
-                        upload_result = minio.upload_image(
-                            result['image_data'],
-                            filename,
-                            "image/jpeg"
-                        )
-                        generation.result_url = upload_result['url']
-                        generation.result_path = upload_result['path']
-                        logger.info(f"[GENERATION] Изображение сохранено, URL: {generation.result_url[:100]}...")
-                    except Exception as e:
-                        logger.error(f"[GENERATION] Ошибка сохранения в MinIO: {e}", exc_info=True)
-                        # Если не удалось сохранить в MinIO, используем URL от Replicate
-                        if result.get('image_url'):
-                            generation.result_url = result['image_url']
-                            logger.warning(f"[GENERATION] Используется URL от Replicate: {generation.result_url}")
-                        else:
-                            raise
-                elif result['image_url']:
-                    generation.result_url = result['image_url']
-                    logger.info(f"[GENERATION] Используется URL от Replicate: {generation.result_url}")
-                
+                logger.info(
+                    "[GENERATION] Результат провайдера: image_url=%s, image_data=%s",
+                    "есть" if result.get("image_url") else "отсутствует",
+                    "есть" if result.get("image_data") else "отсутствует",
+                )
+                upload_result = persist_generation_result(minio, result)
+                if not upload_result:
+                    error_msg = (
+                        "Не удалось сохранить изображение в хранилище. "
+                        "Сеть или сервис провайдера могли быть недоступны — повторите генерацию."
+                    )
+                    logger.error("[GENERATION] %s", error_msg)
+                    generation.status = "failed"
+                    generation.completed_at = datetime.utcnow()
+                    if not generation.generation_metadata:
+                        generation.generation_metadata = {}
+                    generation.generation_metadata["error"] = error_msg
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(generation, "generation_metadata")
+                    session.commit()
+                    return
+
+                generation.result_url = upload_result["url"]
+                generation.result_path = upload_result["path"]
+                logger.info(
+                    "[GENERATION] Результат сохранён в MinIO: %s...",
+                    generation.result_url[:100],
+                )
                 generation.status = "completed"
                 generation.completed_at = datetime.utcnow()
                 total_elapsed = (generation.completed_at - started_at).total_seconds()
@@ -674,6 +576,7 @@ async def generate_image(
             
             logger.info(f"[GENERATION] Активных генераций для пользователя {user.user_id}: {active_count}/{max_concurrent}")
         
+        reference_image_urls: List[str] = []
         # Создаем запись в БД
         with db_service.get_session() as session:
             # Определяем модель для сохранения (по умолчанию "nano-banana-pro")
@@ -708,7 +611,6 @@ async def generate_image(
             logger.info(f"[GENERATION] Генерация {generation_id} создана в БД для пользователя {user.user_id}")
             
             # Теперь сохраняем референсные изображения в MinIO и получаем их URL
-            reference_image_urls = []
             if request.reference_images:
                 import base64
                 for idx, ref_img_data in enumerate(request.reference_images):
@@ -756,9 +658,7 @@ async def generate_image(
                                 logger.error(f"[GENERATION] {error_msg}")
                                 raise ValueError(error_msg)
                             
-                            # Укороченное имя файла (только timestamp + короткий UUID)
-                            # Формат: ref_YYYYMMDD_HHMMSS_XXXX.ext (где XXXX - первые 4 символа UUID)
-                            ref_filename = f"references/ref_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.{ext}"
+                            ref_filename = generate_storage_object_name("references", ext)
                             
                             # ВАЖНО: Сохраняем ОРИГИНАЛЬНОЕ качество в MinIO (без обработки)
                             # Оптимизация будет происходить только при отправке в Replicate API
@@ -769,13 +669,20 @@ async def generate_image(
                             )
                             reference_image_urls.append(upload_result['url'])
                             logger.info(f"[GENERATION] Референс {idx + 1} сохранен в MinIO: {upload_result['url'][:100]}...")
-                        else:
-                            # Если это уже URL, сохраняем как есть
+                        elif ref_img_data.startswith(("http://", "https://")):
+                            if not is_allowed_reference_url(ref_img_data, settings):
+                                raise ValueError(
+                                    f"Референс {idx + 1}: разрешены только ссылки на файлы вашего хранилища "
+                                    f"({settings.MINIO_PUBLIC_URL})"
+                                )
                             reference_image_urls.append(ref_img_data)
+                        else:
+                            raise ValueError(f"Референс {idx + 1}: неподдерживаемый формат (нужен data:image или URL MinIO)")
+                    except ValueError:
+                        raise
                     except Exception as e:
                         logger.error(f"[GENERATION] Ошибка сохранения референса {idx + 1}: {e}", exc_info=True)
-                        # В случае ошибки сохраняем оригинальный data URL как fallback
-                        reference_image_urls.append(ref_img_data)
+                        raise ValueError(f"Ошибка сохранения референса {idx + 1}: {e}") from e
                 
                 # Обновляем generation_metadata с URL референсов
                 if not generation.generation_metadata:
@@ -808,6 +715,8 @@ async def generate_image(
         
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"[GENERATION] Ошибка создания задачи: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Ошибка создания задачи генерации: {str(e)}")
@@ -953,46 +862,10 @@ async def list_generations(
         logger.error(f"[LIST] Ошибка получения списка генераций: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Ошибка получения списка генераций: {str(e)}")
 
-@router.get("/{generation_id}", response_model=dict)
-async def get_generation_full(
-    generation_id: int,
-    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]
-):
-    """Получение полных данных генерации для редактирования"""
-    with db_service.get_session() as session:
-        generation = session.query(Generation).filter(
-            Generation.id == generation_id,
-            Generation.user_id == user.user_id
-        ).first()
-        
-        if not generation:
-            raise HTTPException(status_code=404, detail="Генерация не найдена")
-        
-        metadata = generation.generation_metadata or {}
-        # Получаем model_name из поля или метаданных (для обратной совместимости)
-        model_name = generation.model_name
-        if not model_name:
-            model_name = metadata.get("model_name", "nano-banana-pro")
-        
-        return {
-            "id": generation.id,
-            "prompt": generation.prompt,
-            "negative_prompt": generation.negative_prompt,
-            "generation_mode": generation.generation_mode,
-            "resolution": generation.resolution,
-            "aspect_ratio": generation.aspect_ratio,
-            "guidance_scale": generation.guidance_scale,
-            "num_inference_steps": generation.num_inference_steps,
-            "seed": generation.seed,
-            "model_name": model_name,
-            "reference_images": metadata.get("reference_image_urls", []),
-            "result_url": generation.result_url,
-            "status": generation.status,
-            "error_message": metadata.get('error')
-        }
-
 @router.get("/models")
-async def get_available_models():
+async def get_available_models(
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
     """Получение списка доступных моделей для генерации"""
     from app.services.ReplicateService import ReplicateService
     models = {}
@@ -1090,6 +963,45 @@ async def get_provider_status(
         "has_replicate_key": has_replicate_key,
         "has_bananalab_key": has_bananalab_key,
     }
+
+
+@router.get("/{generation_id}", response_model=dict)
+async def get_generation_full(
+    generation_id: int,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]
+):
+    """Получение полных данных генерации для редактирования"""
+    with db_service.get_session() as session:
+        generation = session.query(Generation).filter(
+            Generation.id == generation_id,
+            Generation.user_id == user.user_id
+        ).first()
+
+        if not generation:
+            raise HTTPException(status_code=404, detail="Генерация не найдена")
+
+        metadata = generation.generation_metadata or {}
+        model_name = generation.model_name
+        if not model_name:
+            model_name = metadata.get("model_name", "nano-banana-pro")
+
+        return {
+            "id": generation.id,
+            "prompt": generation.prompt,
+            "negative_prompt": generation.negative_prompt,
+            "generation_mode": generation.generation_mode,
+            "resolution": generation.resolution,
+            "aspect_ratio": generation.aspect_ratio,
+            "guidance_scale": generation.guidance_scale,
+            "num_inference_steps": generation.num_inference_steps,
+            "seed": generation.seed,
+            "model_name": model_name,
+            "reference_images": metadata.get("reference_image_urls", []),
+            "result_url": generation.result_url,
+            "status": generation.status,
+            "error_message": metadata.get('error')
+        }
+
 
 @router.delete("/{generation_id}")
 async def delete_generation(

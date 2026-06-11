@@ -1878,8 +1878,8 @@ async function handleRegister(e) {
         return;
     }
 
-    if (password.length < 6) {
-        errorDiv.textContent = 'Пароль должен быть не менее 6 символов';
+    if (password.length < 10) {
+        errorDiv.textContent = 'Пароль должен быть не менее 10 символов';
         errorDiv.classList.remove('d-none');
         return;
     }

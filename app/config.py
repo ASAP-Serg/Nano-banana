@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     
     # CORS (для продакшена укажите конкретные домены)
     CORS_ORIGINS: str = Field("*", env="CORS_ORIGINS")
+    API_URL: str = Field("http://localhost:8000", env="API_URL")
 
     # Security hardening
     SECURITY_STRICT_CSP: bool = Field(True, env="SECURITY_STRICT_CSP")
@@ -58,6 +59,11 @@ class Settings(BaseSettings):
     SECURITY_ADMIN_READ_WINDOW_SECONDS: int = Field(60, env="SECURITY_ADMIN_READ_WINDOW_SECONDS")
     SECURITY_CSP_ALLOW_INLINE_SCRIPTS: bool = Field(True, env="SECURITY_CSP_ALLOW_INLINE_SCRIPTS")
     SECURITY_CSP_ALLOW_MINIO_CONSOLE_FRAME: bool = Field(False, env="SECURITY_CSP_ALLOW_MINIO_CONSOLE_FRAME")
+    SECURITY_DISABLE_OPENAPI: bool = Field(False, env="SECURITY_DISABLE_OPENAPI")
+    SECURITY_REGISTER_MAX_ATTEMPTS: int = Field(10, env="SECURITY_REGISTER_MAX_ATTEMPTS")
+    SECURITY_REGISTER_WINDOW_SECONDS: int = Field(3600, env="SECURITY_REGISTER_WINDOW_SECONDS")
+    # Доп. хосты для reference URL (через запятую), помимо MINIO_PUBLIC_URL и API_URL
+    SECURITY_ALLOWED_REF_URL_HOSTS: str = Field("", env="SECURITY_ALLOWED_REF_URL_HOSTS")
     
     class Config:
         env_file = ".env"
