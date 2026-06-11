@@ -10,24 +10,49 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
-      
+        uses: actions/checkout@v4
+
       - name: Deploy to server
-        uses: appleboy/ssh-action@v0.1.7
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 30m
           script: |
-            cd ${{ secrets.DEPLOY_PATH }}
-            # Принудительно обновляем код с GitHub, игнорируя локальные изменения
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            echo "Deploy path: $(pwd)"
+
             git fetch origin master
             git reset --hard origin/master
-            git clean -fd
-            docker-compose down
-            docker-compose up -d --build
-            docker-compose ps
 
+            # НЕ делаем docker-compose down — убивает сайт, postgres может зависнуть на stop
+            if docker compose version >/dev/null 2>&1; then
+              DC="docker compose"
+            else
+              DC="docker-compose"
+            fi
+
+            $DC up -d --build --remove-orphans
+            sleep 15
+            $DC ps
+
+            if ! docker ps --format '{{.Names}}' | grep -q '^nano_banana_api$'; then
+              echo "ERROR: nano_banana_api is not running"
+              docker logs nano_banana_api --tail 50 2>/dev/null || true
+              exit 1
+            fi
+
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/ || echo 000)
+            echo "API health: HTTP $code"
+            if [ "$code" != "200" ]; then
+              docker logs nano_banana_api --tail 50
+              exit 1
+            fi
+
+            systemctl reload nginx || true
+            echo "Deploy OK"
