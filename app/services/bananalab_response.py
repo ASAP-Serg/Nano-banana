@@ -8,6 +8,16 @@ from typing import Any, Dict, Optional, Tuple
 from PIL import Image
 
 
+def _join_base_and_path(base_url: str, path: str) -> str:
+    """Склеивает base_url и относительный path без дублирования /api."""
+    base = (base_url or "").rstrip("/")
+    if not path.startswith("/"):
+        path = "/" + path
+    if base.endswith("/api") and path.startswith("/api/"):
+        path = path[len("/api") :]
+    return f"{base}{path}"
+
+
 def absolute_job_status_url(base_url: str, data: Dict[str, Any]) -> Optional[str]:
     """
     POST /v1/generations отдаёт job_id и/или относительный status_url.
@@ -18,12 +28,24 @@ def absolute_job_status_url(base_url: str, data: Dict[str, Any]) -> Optional[str
     if isinstance(su, str) and su.strip():
         su = su.strip()
         if su.startswith("http://") or su.startswith("https://"):
-            return su
-        return f"{base}{su if su.startswith('/') else '/' + su}"
+            return _normalize_bananalab_job_url(su, base)
+        return _normalize_bananalab_job_url(_join_base_and_path(base, su), base)
     jid = data.get("job_id")
     if jid:
         return f"{base}/v1/jobs/{jid}"
     return None
+
+
+def _normalize_bananalab_job_url(url: str, base_url: str) -> str:
+    """После миграции на bananahub.io job URL иногда приходит без префикса /api."""
+    if "/api/api/" in url:
+        return url.replace("/api/api/", "/api/", 1)
+    for host in ("bananahub.io", "www.bananahub.io"):
+        legacy = f"https://{host}/v1/jobs/"
+        fixed = f"https://{host}/api/v1/jobs/"
+        if url.startswith(legacy):
+            return url.replace(legacy, fixed, 1)
+    return url
 
 
 def detail_from_response_body(data: Any) -> str:

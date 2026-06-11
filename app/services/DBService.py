@@ -88,6 +88,8 @@ class DBService:
             
             # Миграция: добавляем колонку model_name если её нет
             self._migrate_add_model_name_column()
+            # Миграция: добавляем индексы для админ-фильтров
+            self._migrate_add_admin_indexes()
         except Exception as e:
             logger.error(f"Failed to create tables: {str(e)}")
             raise
@@ -121,6 +123,28 @@ class DBService:
         except Exception as e:
             logger.warning(f"[MIGRATION] Ошибка при добавлении колонки model_name (не критично): {e}")
             # Не пробрасываем ошибку, чтобы не блокировать запуск приложения
+
+    def _migrate_add_admin_indexes(self):
+        """Добавляет индексы для ускорения админ-фильтров (idempotent)."""
+        try:
+            from sqlalchemy import text
+
+            statements = [
+                "CREATE INDEX IF NOT EXISTS ix_generations_user_id ON generations (user_id)",
+                "CREATE INDEX IF NOT EXISTS ix_generations_status ON generations (status)",
+                "CREATE INDEX IF NOT EXISTS ix_generations_created_at ON generations (created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_generations_model_name ON generations (model_name)",
+                "CREATE INDEX IF NOT EXISTS ix_generations_user_status_created ON generations (user_id, status, created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_admin_audit_logs_created_at ON admin_audit_logs (created_at)",
+                "CREATE INDEX IF NOT EXISTS ix_admin_audit_logs_actor_admin_id ON admin_audit_logs (actor_admin_id)",
+                "CREATE INDEX IF NOT EXISTS ix_admin_audit_logs_target_user_id ON admin_audit_logs (target_user_id)",
+            ]
+            with self.engine.begin() as conn:
+                for stmt in statements:
+                    conn.execute(text(stmt))
+            logger.info("[MIGRATION] Индексы админ-фильтров проверены/созданы")
+        except Exception as e:
+            logger.warning(f"[MIGRATION] Ошибка при создании индексов (не критично): {e}")
 
 # Инициализация сервиса
 db_service = DBService()

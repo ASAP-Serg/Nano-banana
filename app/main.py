@@ -89,11 +89,14 @@ app = FastAPI(
 # CORS настройки (должен быть первым)
 # ВАЖНО: Для продакшена замените ["*"] на конкретные домены, например:
 # allow_origins=["https://yourdomain.com", "https://www.yourdomain.com"]
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",") if os.getenv("CORS_ORIGINS") else ["*"]
+CORS_ORIGINS = [origin.strip() for origin in app_settings.CORS_ORIGINS.split(",") if origin.strip()] or ["*"]
+allow_credentials = "*" not in CORS_ORIGINS
+if "*" in CORS_ORIGINS:
+    logger.warning("[SECURITY] CORS_ORIGINS содержит '*'. Для продакшена укажите конкретные домены.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -109,15 +112,22 @@ class CSPMiddleware(BaseHTTPMiddleware):
         
         # Для продакшена используйте более строгую политику
         # ВАЖНО: Настройте CSP для вашего домена в продакшене
+        script_src = f"'self' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com"
+        style_src = f"'self' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com"
+        if app_settings.SECURITY_CSP_ALLOW_INLINE_SCRIPTS:
+            script_src = f"{script_src} 'unsafe-inline'"
+            style_src = f"{style_src} 'unsafe-inline'"
+        frame_src = f"'self' {minio_console_url}" if app_settings.SECURITY_CSP_ALLOW_MINIO_CONSOLE_FRAME else "'self'"
+
         if app_settings.SECURITY_STRICT_CSP:
             csp_policy = (
                 f"default-src 'self'; "
                 f"img-src 'self' data: blob: {minio_url} https://replicate.delivery https://*.replicate.delivery; "
-                f"script-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-                f"style-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"script-src {script_src}; "
+                f"style-src {style_src}; "
                 f"font-src 'self' data: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
                 f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw; "
-                f"frame-src 'self' {minio_console_url}; "
+                f"frame-src {frame_src}; "
                 f"object-src 'none'; "
                 f"base-uri 'self'; "
                 f"frame-ancestors 'self';"
@@ -126,11 +136,11 @@ class CSPMiddleware(BaseHTTPMiddleware):
             csp_policy = (
                 f"default-src 'self' 'unsafe-inline' data: blob: {api_url}; "
                 f"img-src 'self' data: blob: {minio_url} https://replicate.delivery https://*.replicate.delivery; "
-                f"script-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-                f"style-src 'self' 'unsafe-inline' {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+                f"script-src {script_src}; "
+                f"style-src {style_src}; "
                 f"font-src 'self' data: {api_url} https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
                 f"connect-src 'self' {api_url} {minio_url} https://replicate.delivery https://*.replicate.delivery https://api.replicate.com https://api.bananalab.pw; "
-                f"frame-src 'self' {minio_console_url};"
+                f"frame-src {frame_src};"
             )
         response.headers["Content-Security-Policy"] = csp_policy
         response.headers["X-Content-Type-Options"] = "nosniff"

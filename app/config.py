@@ -33,13 +33,13 @@ class Settings(BaseSettings):
     PWD_SCHEMES: str = Field("bcrypt", env="PWD_SCHEMES")
     
     # BananaLab API
-    BANANALAB_API_BASE_URL: str = Field("https://api.bananalab.pw", env="BANANALAB_API_BASE_URL")
+    BANANALAB_API_BASE_URL: str = Field("https://bananahub.io/api", env="BANANALAB_API_BASE_URL")
 
     # Legacy поле (используется как API key из UI; имя оставлено для совместимости)
     REPLICATE_API_TOKEN: str = Field("", env="REPLICATE_API_TOKEN")
 
     # Banana Lab (Nano Banana HTTP API)
-    BANANALAB_BASE_URL: str = Field("https://api.bananalab.pw", env="BANANALAB_BASE_URL")
+    BANANALAB_BASE_URL: str = Field("https://bananahub.io/api", env="BANANALAB_BASE_URL")
     
     # Performance
     # По умолчанию запускаем только одну генерацию одновременно, чтобы уменьшить вероятность E003/rate-limit
@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     SECURITY_ENABLE_HSTS: bool = Field(True, env="SECURITY_ENABLE_HSTS")
     SECURITY_LOGIN_MAX_ATTEMPTS: int = Field(10, env="SECURITY_LOGIN_MAX_ATTEMPTS")
     SECURITY_LOGIN_WINDOW_SECONDS: int = Field(300, env="SECURITY_LOGIN_WINDOW_SECONDS")
+    SECURITY_ADMIN_READ_MAX_REQUESTS: int = Field(120, env="SECURITY_ADMIN_READ_MAX_REQUESTS")
+    SECURITY_ADMIN_READ_WINDOW_SECONDS: int = Field(60, env="SECURITY_ADMIN_READ_WINDOW_SECONDS")
+    SECURITY_CSP_ALLOW_INLINE_SCRIPTS: bool = Field(True, env="SECURITY_CSP_ALLOW_INLINE_SCRIPTS")
+    SECURITY_CSP_ALLOW_MINIO_CONSOLE_FRAME: bool = Field(False, env="SECURITY_CSP_ALLOW_MINIO_CONSOLE_FRAME")
     
     class Config:
         env_file = ".env"

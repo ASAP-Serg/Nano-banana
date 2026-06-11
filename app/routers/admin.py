@@ -4,21 +4,53 @@
 
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
+import threading
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_, func
 
-from app.models.base import Generation, User
+from app.models.base import Generation, User, AdminAuditLog
 from app.models.token import TokenPayload
 from app.services.AuthService import auth_service
 from app.services.DBService import db_service
+from app.config import settings
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+_admin_read_attempts = {}
+_admin_read_lock = threading.Lock()
 
 
 def _require_admin(user: TokenPayload):
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Доступ только для админов")
+
+
+def _rate_limit_admin_read(user_id: int, scope: str):
+    now = time.time()
+    window = settings.SECURITY_ADMIN_READ_WINDOW_SECONDS
+    max_requests = settings.SECURITY_ADMIN_READ_MAX_REQUESTS
+    key = f"{user_id}:{scope}"
+    with _admin_read_lock:
+        attempts = _admin_read_attempts.get(key, [])
+        attempts = [ts for ts in attempts if now - ts <= window]
+        if len(attempts) >= max_requests:
+            raise HTTPException(
+                status_code=429,
+                detail="Слишком много админ-запросов. Повторите позже.",
+            )
+        attempts.append(now)
+        _admin_read_attempts[key] = attempts
+
+
+def _audit_admin_action(session, actor_admin_id: int, action: str, target_user_id: Optional[int], details: Optional[dict] = None):
+    log_row = AdminAuditLog(
+        actor_admin_id=actor_admin_id,
+        target_user_id=target_user_id,
+        action=action,
+        details=details or {},
+    )
+    session.add(log_row)
 
 
 def _infer_provider(gen: Generation) -> str:
@@ -62,6 +94,7 @@ async def admin_list_users(
     offset: int = Query(0, ge=0),
 ):
     _require_admin(user)
+    _rate_limit_admin_read(user.user_id, "users")
     with db_service.get_session() as session:
         query = session.query(User)
         if search:
@@ -92,6 +125,7 @@ async def admin_filters(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     _require_admin(user)
+    _rate_limit_admin_read(user.user_id, "filters")
     with db_service.get_session() as session:
         users = session.query(User).order_by(User.username.asc()).all()
         models = (
@@ -120,6 +154,13 @@ async def admin_grant_role(
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
         target.is_admin = True
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="grant_admin",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
         session.commit()
         return {"message": f"Пользователь {target.username} назначен админом"}
 
@@ -143,6 +184,13 @@ async def admin_revoke_role(
             raise HTTPException(status_code=400, detail="Нельзя снять права у последнего админа")
 
         target.is_admin = False
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="revoke_admin",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
         session.commit()
         return {"message": f"Права админа сняты у пользователя {target.username}"}
 
@@ -162,6 +210,7 @@ async def admin_list_generations(
     offset: int = Query(0, ge=0),
 ):
     _require_admin(user)
+    _rate_limit_admin_read(user.user_id, "generations")
     with db_service.get_session() as session:
         query = session.query(Generation)
         if user_id is not None:
@@ -216,6 +265,7 @@ async def admin_overview(
     user_id: Optional[int] = None,
 ):
     _require_admin(user)
+    _rate_limit_admin_read(user.user_id, "overview")
     cutoff = datetime.utcnow() - timedelta(days=period_days)
 
     with db_service.get_session() as session:
