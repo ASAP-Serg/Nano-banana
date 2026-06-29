@@ -25,6 +25,7 @@ from app.config import settings
 from app.models.token import TokenPayload
 from app.security_helpers import generate_storage_object_name, is_allowed_reference_url
 from app.services.result_storage import persist_generation_result
+from app.services.bananalab_response import humanize_api_error
 
 logger = logging.getLogger(__name__)
 
@@ -343,7 +344,9 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                 elif hasattr(gen_error, 'args') and len(gen_error.args) > 0:
                     error_msg = str(gen_error.args[0])
                 
-                full_error_msg = f"Ошибка генерации ({provider_label}): {error_msg}"
+                full_error_msg = humanize_api_error(error_msg)
+                if not full_error_msg.startswith(("Banana Lab", "Ошибка провайдера", "Сервис Banana")):
+                    full_error_msg = f"Ошибка генерации ({provider_label}): {full_error_msg}"
                 
                 logger.error(f"[GENERATION] {full_error_msg}", exc_info=True)
                 generation.status = "failed"
@@ -410,6 +413,7 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                 if not isinstance(error_message, str):
                     error_message = str(error_message)
 
+                error_message = humanize_api_error(error_message)
                 if _is_paused_error(error_message):
                     generation.status = "paused"
                     generation.completed_at = None
@@ -440,6 +444,10 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                     or "high demand" in lower_err
                     or "429" in lower_err
                     or "ratelimit" in lower_err
+                    or "временно недоступен" in lower_err
+                    or "521" in lower_err
+                    or "522" in lower_err
+                    or "524" in lower_err
                 )
 
                 current_retries = generation.generation_metadata.get("retry_count", 0)
@@ -531,7 +539,7 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                 if not generation.generation_metadata:
                     generation.generation_metadata = {}
                 generation.generation_metadata.pop("paused_request_data", None)
-                generation.generation_metadata['error'] = str(e)
+                generation.generation_metadata['error'] = humanize_api_error(str(e))
                 # ВАЖНО: Уведомляем SQLAlchemy об изменении JSON поля
                 from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(generation, "generation_metadata")

@@ -16,7 +16,10 @@ from app.services.bananalab_response import (
     absolute_job_status_url,
     detail_from_response_body,
     find_image_in_json,
+    humanize_api_error,
 )
+
+_GATEWAY_RETRY_STATUS = frozenset((502, 503, 521, 522, 523, 524))
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +131,11 @@ class BananalabService:
                     or current.get("message")
                     or detail_from_response_body(current)
                 )
-                return {"__bananalab_job_failed__": True, "error": str(err), "_raw": current}
+                return {
+                    "__bananalab_job_failed__": True,
+                    "error": humanize_api_error(err),
+                    "_raw": current,
+                }
 
             img_b, img_u = find_image_in_json(current)
             if img_b or img_u:
@@ -169,8 +176,8 @@ class BananalabService:
                 )
                 return {
                     "__bananalab_job_failed__": True,
-                    "error": detail_from_response_body(body),
-                    "retryable": False,
+                    "error": humanize_api_error(detail_from_response_body(body), pr.status_code),
+                    "retryable": pr.status_code in _GATEWAY_RETRY_STATUS or pr.status_code == 429,
                     "_raw": body,
                 }
 
@@ -179,8 +186,9 @@ class BananalabService:
             except Exception as e:
                 return {
                     "__bananalab_job_failed__": True,
-                    "error": f"Ответ job не JSON: {e}",
-                    "retryable": False,
+                    "error": humanize_api_error(pr.text, pr.status_code)
+                    or f"Ответ job не JSON: {e}",
+                    "retryable": pr.status_code in _GATEWAY_RETRY_STATUS,
                     "_raw": None,
                 }
 
@@ -319,8 +327,13 @@ class BananalabService:
                 )
 
                 if resp.status_code == 429 or resp.status_code == 503:
-                    text = detail_from_response_body(
-                        resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+                    text = humanize_api_error(
+                        detail_from_response_body(
+                            resp.json()
+                            if resp.headers.get("content-type", "").startswith("application/json")
+                            else resp.text
+                        ),
+                        resp.status_code,
                     )
                     last_exc = RuntimeError(text)
                     if attempt < self.MAX_RETRIES:
@@ -333,10 +346,15 @@ class BananalabService:
                         body = resp.json()
                     except Exception:
                         body = resp.text
-                    msg = detail_from_response_body(body)
+                    msg = humanize_api_error(detail_from_response_body(body), resp.status_code)
                     lower = msg.lower()
-                    retryable = resp.status_code == 429 or any(
-                        x in lower for x in ("429", "rate limit", "too many", "temporarily", "unavailable")
+                    retryable = (
+                        resp.status_code == 429
+                        or resp.status_code in _GATEWAY_RETRY_STATUS
+                        or any(
+                            x in lower
+                            for x in ("429", "rate limit", "too many", "temporarily", "unavailable")
+                        )
                     )
                     logger.error(
                         "[BANANALAB] POST generations HTTP %s. Кратко: %s | Полное тело: %s",
@@ -385,8 +403,9 @@ class BananalabService:
                         "success": False,
                         "image_url": None,
                         "image_data": None,
-                        "error": f"Ответ Banana Lab не JSON: {e}",
-                        "retryable": False,
+                        "error": humanize_api_error(resp.text, resp.status_code)
+                        or f"Ответ Banana Lab не JSON: {e}",
+                        "retryable": resp.status_code in _GATEWAY_RETRY_STATUS,
                     }
 
                 if isinstance(data, dict) and (data.get("job_id") or data.get("status_url")):

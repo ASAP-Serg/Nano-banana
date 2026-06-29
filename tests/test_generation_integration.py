@@ -3,7 +3,7 @@ import unittest
 
 from app.services.generation_prompt import enhance_prompt_for_image_generation
 from app.services.image_api_provider import infer_image_api_provider
-from app.services.bananalab_response import detail_from_response_body, find_image_in_json
+from app.services.bananalab_response import detail_from_response_body, find_image_in_json, humanize_api_error
 
 
 class TestProvider(unittest.TestCase):
@@ -136,6 +136,32 @@ class TestBananalabParse(unittest.TestCase):
         b, u = find_image_in_json(sample)
         self.assertIsNone(b)
         self.assertTrue(u.startswith("https://api.bananalab.pw/"))
+
+
+class TestHumanizeApiError(unittest.TestCase):
+    _CF_521_HTML = """<!DOCTYPE html>
+<html><head><title>bananahub.io | 521: Web server is down</title></head>
+<body><div class="cf-error-details"><h1>Web server is down</h1>
+<p>Error code 521</p></div></body></html>"""
+
+    def test_cloudflare_521_html(self):
+        msg = humanize_api_error(self._CF_521_HTML, 521)
+        self.assertIn("521", msg)
+        self.assertNotIn("<!DOCTYPE", msg)
+        self.assertNotIn("cf-error-details", msg)
+
+    def test_json_detail_unchanged(self):
+        msg = humanize_api_error({"detail": "Model is paused due to high load"})
+        self.assertEqual(msg, "Model is paused due to high load")
+
+    def test_http_status_without_body(self):
+        msg = humanize_api_error("", 503)
+        self.assertIn("503", msg)
+
+    def test_long_plain_text_truncated(self):
+        msg = humanize_api_error("x" * 1000)
+        self.assertLessEqual(len(msg), 520)
+        self.assertTrue(msg.endswith("…"))
 
 
 if __name__ == "__main__":

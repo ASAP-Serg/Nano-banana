@@ -48,11 +48,79 @@ def _normalize_bananalab_job_url(url: str, base_url: str) -> str:
     return url
 
 
+_CLOUDFLARE_GATEWAY_MESSAGES = {
+    "502": "Banana Lab временно недоступен (502): ошибка шлюза. Попробуйте через несколько минут.",
+    "503": "Banana Lab временно недоступен (503): сервис перегружен. Попробуйте позже.",
+    "521": "Banana Lab временно недоступен (521): сервер провайдера не отвечает. Попробуйте через несколько минут.",
+    "522": "Banana Lab временно недоступен (522): не удалось подключиться к серверу провайдера.",
+    "523": "Banana Lab временно недоступен (523): сервер провайдера недостижим.",
+    "524": "Banana Lab временно недоступен (524): провайдер не ответил вовремя.",
+}
+
+_MAX_USER_ERROR_LEN = 500
+
+
+def _looks_like_html(text: str) -> bool:
+    lower = text.lower()
+    return any(
+        marker in lower
+        for marker in ("<!doctype html", "<html", "cf-error-details", "<body", "cloudflare")
+    )
+
+
+def _extract_cloudflare_error_code(text: str) -> Optional[str]:
+    lower = text.lower()
+    match = re.search(r"error code (\d{3})", lower)
+    if match:
+        return match.group(1)
+    for code in _CLOUDFLARE_GATEWAY_MESSAGES:
+        if f" {code}" in lower or f"({code}" in lower or f"|{code}" in lower:
+            return code
+    return None
+
+
+def humanize_api_error(message: Any, http_status: Optional[int] = None) -> str:
+    """Короткое сообщение для UI вместо HTML-страниц Cloudflare и прочего шума."""
+    if message is None:
+        text = ""
+    elif isinstance(message, dict):
+        text = detail_from_response_body(message)
+    else:
+        text = str(message).strip()
+
+    if not text:
+        if http_status and str(http_status) in _CLOUDFLARE_GATEWAY_MESSAGES:
+            return _CLOUDFLARE_GATEWAY_MESSAGES[str(http_status)]
+        return "Неизвестная ошибка API"
+
+    if _looks_like_html(text):
+        cf_code = _extract_cloudflare_error_code(text)
+        if cf_code and cf_code in _CLOUDFLARE_GATEWAY_MESSAGES:
+            return _CLOUDFLARE_GATEWAY_MESSAGES[cf_code]
+        title_match = re.search(r"<title>([^<]+)</title>", text, re.I)
+        if title_match:
+            title = title_match.group(1).strip()
+            if "|" in title:
+                title = title.split("|", 1)[1].strip()
+            return f"Ошибка провайдера: {title}"
+        if http_status and str(http_status) in _CLOUDFLARE_GATEWAY_MESSAGES:
+            return _CLOUDFLARE_GATEWAY_MESSAGES[str(http_status)]
+        return "Сервис Banana Lab вернул страницу ошибки вместо JSON. Попробуйте позже."
+
+    status_key = str(http_status) if http_status else None
+    if status_key in _CLOUDFLARE_GATEWAY_MESSAGES and http_status and http_status >= 500:
+        return _CLOUDFLARE_GATEWAY_MESSAGES[status_key]
+
+    if len(text) > _MAX_USER_ERROR_LEN:
+        return text[:_MAX_USER_ERROR_LEN] + "…"
+    return text
+
+
 def detail_from_response_body(data: Any) -> str:
     if isinstance(data, dict):
         d = data.get("detail")
         if isinstance(d, str):
-            return d
+            return humanize_api_error(d)
         if isinstance(d, list):
             parts = []
             for item in d:
@@ -62,12 +130,12 @@ def detail_from_response_body(data: Any) -> str:
                     parts.append(f"{loc}: {msg}" if loc else str(msg))
                 else:
                     parts.append(str(item))
-            return "; ".join(parts) if parts else json.dumps(data)
+            return humanize_api_error("; ".join(parts) if parts else json.dumps(data))
         if d is not None:
-            return str(d)
+            return humanize_api_error(str(d))
         if "message" in data:
-            return str(data["message"])
-    return str(data) if data else "Неизвестная ошибка API"
+            return humanize_api_error(str(data["message"]))
+    return humanize_api_error(str(data) if data else "Неизвестная ошибка API")
 
 
 def find_image_in_json(obj: Any, depth: int = 0) -> Tuple[Optional[bytes], Optional[str]]:
