@@ -151,8 +151,32 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertNotIn("cf-error-details", msg)
 
     def test_json_detail_unchanged(self):
+        msg = humanize_api_error({"detail": "Invalid API key"})
+        self.assertEqual(msg, "Invalid API key")
+
+    def test_model_paused_humanized(self):
         msg = humanize_api_error({"detail": "Model is paused due to high load"})
-        self.assertEqual(msg, "Model is paused due to high load")
+        self.assertIn("на паузе", msg.lower())
+        self.assertNotIn("перегружен", msg.lower())
+
+    def test_project_paused_503_not_overloaded(self):
+        msg = humanize_api_error({"detail": "Project is paused."}, 503)
+        self.assertIn("на паузе", msg.lower())
+        self.assertNotIn("перегружен", msg.lower())
+
+    def test_nested_detail_message(self):
+        msg = humanize_api_error(
+            {"detail": {"message": "Project is paused.", "field": None, "details": None}},
+            503,
+        )
+        self.assertIn("на паузе", msg.lower())
+
+    def test_is_bananalab_paused_message(self):
+        from app.services.bananalab_response import is_bananalab_paused_message
+
+        self.assertTrue(is_bananalab_paused_message("Project is paused."))
+        self.assertTrue(is_bananalab_paused_message("Проект Banana Lab на паузе."))
+        self.assertFalse(is_bananalab_paused_message("rate limit exceeded"))
 
     def test_http_status_without_body(self):
         msg = humanize_api_error("", 503)

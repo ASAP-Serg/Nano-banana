@@ -17,6 +17,7 @@ from app.services.bananalab_response import (
     detail_from_response_body,
     find_image_in_json,
     humanize_api_error,
+    is_bananalab_paused_message,
 )
 
 _GATEWAY_RETRY_STATUS = frozenset((502, 503, 521, 522, 523, 524))
@@ -335,6 +336,15 @@ class BananalabService:
                         ),
                         resp.status_code,
                     )
+                    if is_bananalab_paused_message(text):
+                        return {
+                            "success": False,
+                            "image_url": None,
+                            "image_data": None,
+                            "error": text,
+                            "retryable": False,
+                            "paused": True,
+                        }
                     last_exc = RuntimeError(text)
                     if attempt < self.MAX_RETRIES:
                         logger.warning("[BANANALAB] %s, повтор через %ss", text, self.RETRY_DELAY_SECONDS)
@@ -347,6 +357,18 @@ class BananalabService:
                     except Exception:
                         body = resp.text
                     msg = humanize_api_error(detail_from_response_body(body), resp.status_code)
+                    if is_bananalab_paused_message(msg) or (
+                        isinstance(body, dict)
+                        and is_bananalab_paused_message(detail_from_response_body(body))
+                    ):
+                        return {
+                            "success": False,
+                            "image_url": None,
+                            "image_data": None,
+                            "error": msg,
+                            "retryable": False,
+                            "paused": True,
+                        }
                     lower = msg.lower()
                     retryable = (
                         resp.status_code == 429

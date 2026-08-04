@@ -59,6 +59,21 @@ _CLOUDFLARE_GATEWAY_MESSAGES = {
 
 _MAX_USER_ERROR_LEN = 500
 
+BANANALAB_PROJECT_PAUSED_MESSAGE = (
+    "Проект Banana Lab на паузе. Генерация временно недоступна — "
+    "дождитесь возобновления или обратитесь в поддержку BananaHub."
+)
+
+
+def is_bananalab_paused_message(text: Any) -> bool:
+    lower = str(text or "").lower()
+    return (
+        "project is paused" in lower
+        or "model is paused" in lower
+        or "проект banana lab на паузе" in lower
+        or ("project or nanobanana" in lower and "try again later" in lower)
+    )
+
 
 def _looks_like_html(text: str) -> bool:
     lower = text.lower()
@@ -107,8 +122,13 @@ def humanize_api_error(message: Any, http_status: Optional[int] = None) -> str:
             return _CLOUDFLARE_GATEWAY_MESSAGES[str(http_status)]
         return "Сервис Banana Lab вернул страницу ошибки вместо JSON. Попробуйте позже."
 
+    if is_bananalab_paused_message(text):
+        return BANANALAB_PROJECT_PAUSED_MESSAGE
+
     status_key = str(http_status) if http_status else None
     if status_key in _CLOUDFLARE_GATEWAY_MESSAGES and http_status and http_status >= 500:
+        if len(text) < 120 and not _looks_like_html(text):
+            return text
         return _CLOUDFLARE_GATEWAY_MESSAGES[status_key]
 
     if len(text) > _MAX_USER_ERROR_LEN:
@@ -119,6 +139,11 @@ def humanize_api_error(message: Any, http_status: Optional[int] = None) -> str:
 def detail_from_response_body(data: Any) -> str:
     if isinstance(data, dict):
         d = data.get("detail")
+        if isinstance(d, dict):
+            msg = d.get("message") or d.get("detail")
+            if msg is not None:
+                return humanize_api_error(str(msg))
+            return humanize_api_error(json.dumps(d, ensure_ascii=False))
         if isinstance(d, str):
             return humanize_api_error(d)
         if isinstance(d, list):

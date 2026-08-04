@@ -93,6 +93,8 @@ services:
   api:
     build: .
     container_name: nano_banana_api
+    extra_hosts:
+      - "bananahub.io:5.63.19.95"
     ports:
       - "127.0.0.1:8000:8000"
     environment:

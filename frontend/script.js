@@ -993,7 +993,21 @@ async function loadProviderStatus() {
 
         if (data.state === 'paused') {
             banner.className = 'alert alert-warning py-2 px-3 mt-2 mb-0 small';
-            text.textContent = `Провайдер на паузе. ${data.message || ''}`;
+            let durationText = '';
+            if (typeof data.paused_duration_seconds === 'number' && data.paused_duration_seconds >= 0) {
+                const total = data.paused_duration_seconds;
+                const hours = Math.floor(total / 3600);
+                const minutes = Math.floor((total % 3600) / 60);
+                const seconds = total % 60;
+                if (hours > 0) {
+                    durationText = ` На паузе уже ${hours} ч ${minutes} мин.`;
+                } else if (minutes > 0) {
+                    durationText = ` На паузе уже ${minutes} мин ${seconds} сек.`;
+                } else {
+                    durationText = ` На паузе уже ${seconds} сек.`;
+                }
+            }
+            text.textContent = (data.message || 'BananaLab: проект на паузе у провайдера.') + durationText;
         } else if (data.state === 'ok') {
             banner.className = 'alert alert-success py-2 px-3 mt-2 mb-0 small';
             text.textContent = data.message || 'Провайдер доступен, можно генерировать.';

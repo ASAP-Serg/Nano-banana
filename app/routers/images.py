@@ -25,7 +25,7 @@ from app.config import settings
 from app.models.token import TokenPayload
 from app.security_helpers import generate_storage_object_name, is_allowed_reference_url
 from app.services.result_storage import persist_generation_result
-from app.services.bananalab_response import humanize_api_error
+from app.services.bananalab_response import humanize_api_error, is_bananalab_paused_message
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ bananalab_runtime_state = {
     "last_paused_at": None,
     "last_paused_error": None,
     "last_success_at": None,
+    "project_paused_since": None,
 }
 
 
@@ -61,12 +62,45 @@ def get_fallback_model(model_name: Optional[str]) -> Optional[str]:
 def _is_paused_error(error_message: str) -> bool:
     if not error_message:
         return False
-    lower_err = error_message.lower()
-    return (
-        "is paused" in lower_err
-        or "model is paused" in lower_err
-        or ("project or nanobanana" in lower_err and "try again later" in lower_err)
-    )
+    return is_bananalab_paused_message(error_message)
+
+
+def _mark_bananalab_paused(error_message: str) -> None:
+    now = datetime.utcnow().isoformat()
+    bananalab_runtime_state["last_paused_at"] = now
+    bananalab_runtime_state["last_paused_error"] = error_message
+    if not bananalab_runtime_state.get("project_paused_since"):
+        bananalab_runtime_state["project_paused_since"] = now
+
+
+def _clear_bananalab_paused() -> None:
+    bananalab_runtime_state["project_paused_since"] = None
+    bananalab_runtime_state["last_paused_error"] = None
+
+
+def _bananalab_is_paused() -> bool:
+    last_paused = bananalab_runtime_state.get("last_paused_at")
+    last_success = bananalab_runtime_state.get("last_success_at")
+    last_error = bananalab_runtime_state.get("last_paused_error") or ""
+    if _is_paused_error(last_error):
+        if last_paused and (not last_success or str(last_success) < str(last_paused)):
+            return True
+    queue_size = _queue_size()
+    if queue_size > 0 and last_paused:
+        if not last_success or str(last_success) < str(last_paused):
+            return True
+    return False
+
+
+def _paused_duration_seconds() -> Optional[int]:
+    since = bananalab_runtime_state.get("project_paused_since") or bananalab_runtime_state.get("last_paused_at")
+    if not since:
+        return None
+    try:
+        started = datetime.fromisoformat(str(since))
+        return max(0, int((datetime.utcnow() - started).total_seconds()))
+    except ValueError:
+        return None
 
 
 def _queue_size() -> int:
@@ -364,6 +398,7 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
             if result['success']:
                 if provider == "bananalab":
                     bananalab_runtime_state["last_success_at"] = datetime.utcnow().isoformat()
+                    _clear_bananalab_paused()
                 if generation.generation_metadata and generation.generation_metadata.get("paused_request_data"):
                     generation.generation_metadata.pop("paused_request_data", None)
                 logger.info(
@@ -414,7 +449,7 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                     error_message = str(error_message)
 
                 error_message = humanize_api_error(error_message)
-                if _is_paused_error(error_message):
+                if result.get("paused") or _is_paused_error(error_message):
                     generation.status = "paused"
                     generation.completed_at = None
                     paused_payload = _build_resume_payload(generation, request_data)
@@ -422,8 +457,7 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                     generation.generation_metadata["paused_at"] = datetime.utcnow().isoformat()
                     generation.generation_metadata["paused_request_data"] = paused_payload
                     if provider == "bananalab":
-                        bananalab_runtime_state["last_paused_at"] = generation.generation_metadata["paused_at"]
-                        bananalab_runtime_state["last_paused_error"] = error_message
+                        _mark_bananalab_paused(error_message)
                     from sqlalchemy.orm.attributes import flag_modified
                     flag_modified(generation, "generation_metadata")
                     session.commit()
@@ -949,25 +983,43 @@ async def get_provider_status(
             "has_bananalab_key": has_bananalab_key,
         }
 
-    # Banana Lab: считаем paused, если есть paused-очередь и не было более свежего успеха
-    is_paused = False
-    if queue_size > 0 and last_paused_at:
-        if not last_success_at or str(last_success_at) < str(last_paused_at):
-            is_paused = True
+    # Banana Lab: paused если API вернул project paused или есть paused-очередь
+    is_paused = _bananalab_is_paused()
+    paused_since = bananalab_runtime_state.get("project_paused_since") or (
+        bananalab_runtime_state.get("last_paused_at") if is_paused else None
+    )
+    paused_duration_seconds = _paused_duration_seconds() if is_paused else None
+    queue_size = _queue_size()
+
+    if is_paused:
+        duration_hint = ""
+        if paused_duration_seconds is not None:
+            hours, rem = divmod(paused_duration_seconds, 3600)
+            minutes, seconds = divmod(rem, 60)
+            if hours:
+                duration_hint = f" На паузе уже {hours} ч {minutes} мин."
+            elif minutes:
+                duration_hint = f" На паузе уже {minutes} мин {seconds} сек."
+            else:
+                duration_hint = f" На паузе уже {seconds} сек."
+        message = (
+            f"BananaLab: проект на паузе у провайдера.{duration_hint} "
+            f"Задач в очереди: {queue_size}. Автоповтор включён."
+        )
+    else:
+        message = "BananaLab: генерация доступна."
 
     return {
         "provider": "bananalab",
         "state": "paused" if is_paused else "ok",
         "can_generate": not is_paused,
-        "message": (
-            f"BananaLab на паузе, задач в очереди: {queue_size}. Автоповтор включен."
-            if is_paused
-            else "BananaLab: генерация доступна."
-        ),
+        "message": message,
         "paused_queue_size": queue_size,
         "last_paused_at": last_paused_at,
         "last_success_at": last_success_at,
         "last_paused_error": last_paused_error,
+        "paused_since": paused_since,
+        "paused_duration_seconds": paused_duration_seconds,
         "has_replicate_key": has_replicate_key,
         "has_bananalab_key": has_bananalab_key,
     }
