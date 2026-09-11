@@ -1249,3 +1249,224 @@ button.info-btn:hover,
 .reference-drop-title {
     color: var(--foreground);
 }
+
+/* --- Service status bar (under navbar) --- */
+.service-status-bar {
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.02));
+    backdrop-filter: blur(8px);
+}
+
+.service-status-bar__inner {
+    padding: 0.85rem 0 1rem;
+}
+
+.service-status-bar__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.service-status-bar__title-wrap {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.service-status-bar__pulse {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    margin-top: 0.35rem;
+    flex-shrink: 0;
+    background: var(--muted-foreground);
+    box-shadow: 0 0 0 0 rgba(161, 161, 170, 0.45);
+    animation: service-status-pulse 2s infinite;
+}
+
+.service-status-bar__title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--foreground);
+    letter-spacing: 0.01em;
+}
+
+.service-status-bar__subtitle {
+    font-size: 0.82rem;
+    color: var(--muted-foreground);
+    margin-top: 0.15rem;
+    max-width: 52rem;
+}
+
+.service-status-bar__link {
+    font-size: 0.78rem;
+    color: var(--muted-foreground);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.service-status-bar__link:hover {
+    color: var(--foreground);
+}
+
+.service-status-bar__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.service-status-bar__grid--triple {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 992px) {
+    .service-status-bar__grid--triple {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .service-status-bar__grid {
+        grid-template-columns: 1fr;
+    }
+
+    .service-status-bar__head {
+        flex-direction: column;
+    }
+}
+
+.service-status-card {
+    display: flex;
+    gap: 0.85rem;
+    padding: 0.85rem 1rem;
+    border-radius: calc(var(--radius) + 2px);
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.02);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    min-height: 92px;
+}
+
+[data-bs-theme="light"] .service-status-card {
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.service-status-card__icon {
+    width: 44px;
+    height: 44px;
+    flex-shrink: 0;
+}
+
+.service-status-card__icon svg {
+    width: 44px;
+    height: 44px;
+    display: block;
+}
+
+.service-status-card__body {
+    min-width: 0;
+    flex: 1;
+}
+
+.service-status-card__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.service-status-card__name {
+    margin: 0;
+    font-size: 0.92rem;
+    font-weight: 700;
+}
+
+.service-status-card__badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+}
+
+.service-status-card__message {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    color: var(--muted-foreground);
+}
+
+.service-status-card__meta {
+    margin-top: 0.35rem;
+    font-size: 0.72rem;
+    color: var(--muted-foreground);
+}
+
+.service-status-card__link {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.service-status-card--ok {
+    border-color: rgba(34, 197, 94, 0.35);
+    color: #22c55e;
+}
+
+.service-status-card--degraded,
+.service-status-card--paused,
+.service-status-card--failing {
+    border-color: rgba(245, 158, 11, 0.45);
+    color: #f59e0b;
+}
+
+.service-status-card--incident,
+.service-status-card--unavailable {
+    border-color: rgba(239, 68, 68, 0.45);
+    color: #ef4444;
+}
+
+.service-status-card--unknown,
+.service-status-card--checking {
+    border-color: rgba(161, 161, 170, 0.35);
+    color: var(--muted-foreground);
+}
+
+.service-status-bar--ok .service-status-bar__pulse {
+    background: #22c55e;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.45);
+}
+
+.service-status-bar--degraded .service-status-bar__pulse,
+.service-status-bar--paused .service-status-bar__pulse {
+    background: #f59e0b;
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.45);
+}
+
+.service-status-bar--incident .service-status-bar__pulse,
+.service-status-bar--unavailable .service-status-bar__pulse {
+    background: #ef4444;
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45);
+}
+
+.service-status-bar--unknown .service-status-bar__pulse,
+.service-status-bar--checking .service-status-bar__pulse {
+    background: var(--muted-foreground);
+}
+
+@keyframes service-status-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(99, 102, 241, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
+    }
+}

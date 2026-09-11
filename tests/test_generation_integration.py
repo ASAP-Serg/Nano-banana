@@ -335,6 +335,75 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertLessEqual(len(msg), 520)
         self.assertTrue(msg.endswith("…"))
 
+    def test_is_bananalab_upstream_internal_error_message(self):
+        from app.services.bananalab_response import is_bananalab_upstream_internal_error_message
+
+        self.assertTrue(
+            is_bananalab_upstream_internal_error_message(
+                "Generation failed: upstream provider internal error"
+            )
+        )
+        self.assertFalse(is_bananalab_upstream_internal_error_message("Project is paused."))
+
+    def test_user_generation_status_upstream_streak(self):
+        from app.services.user_generation_status import build_user_generation_status
+
+        status = build_user_generation_status(
+            [
+                {"id": 2, "status": "failed", "error": "Generation failed: upstream provider internal error"},
+                {"id": 1, "status": "failed", "error": "Generation failed: upstream provider internal error"},
+                {"id": 0, "status": "completed", "error": None},
+            ]
+        )
+        self.assertEqual(status["state"], "degraded")
+        self.assertEqual(status["fail_streak"], 2)
+        self.assertIn("Google upstream", status["message"])
+
+    def test_user_generation_status_last_success_ok(self):
+        from app.services.user_generation_status import build_user_generation_status
+
+        status = build_user_generation_status(
+            [
+                {"id": 3, "status": "completed", "error": None},
+                {"id": 2, "status": "failed", "error": "Generation failed: upstream provider internal error"},
+            ]
+        )
+        self.assertEqual(status["state"], "ok")
+
+    def test_google_gemini_status_filters_active_incident(self):
+        from app.services import google_cloud_status as gcs
+
+        sample = [
+            {
+                "id": "1",
+                "external_desc": "Vertex AI Gemini API customers experienced increased error rates.",
+                "begin": "2026-09-11T10:00:00+00:00",
+                "end": None,
+            },
+            {
+                "id": "2",
+                "external_desc": "Cloud Storage bucket listing delays",
+                "begin": "2026-09-11T10:00:00+00:00",
+                "end": None,
+            },
+        ]
+
+        def fake_fetch():
+            return sample
+
+        gcs._cache["checked_at"] = None
+        original = gcs._fetch_incidents
+        gcs._fetch_incidents = fake_fetch
+        try:
+            status = gcs.get_google_gemini_status(force_refresh=True)
+        finally:
+            gcs._fetch_incidents = original
+
+        self.assertTrue(status["fetch_ok"])
+        self.assertTrue(status["has_active_incident"])
+        self.assertEqual(len(status["active_incidents"]), 1)
+        self.assertIn("Gemini", status["active_incidents"][0]["title"])
+
 
 if __name__ == "__main__":
     unittest.main()

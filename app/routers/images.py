@@ -40,10 +40,16 @@ from app.services.bananalab_response import (
     humanize_api_error,
     is_bananalab_paused_message,
     is_bananalab_unavailable_message,
+    is_bananalab_upstream_internal_error_message,
     is_bananalab_upstream_no_image_message,
     is_bananalab_empty_done_message,
     is_policy_block_error,
     upstream_no_image_retry_delay_seconds,
+)
+from app.services.google_cloud_status import get_google_gemini_status
+from app.services.user_generation_status import (
+    USER_STATUS_SAMPLE_SIZE,
+    build_user_generation_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -71,12 +77,19 @@ bananalab_runtime_state = {
     "last_unavailable_at": None,
     "last_unavailable_error": None,
     "provider_unavailable_since": None,
+    "last_upstream_error_at": None,
+    "last_upstream_error_message": None,
+    "upstream_error_count": 0,
+    "upstream_degraded_since": None,
     "health_probe_at": None,
     "health_probe_ok": None,
     "health_probe_error": None,
 }
 
 BANANALAB_HEALTH_PROBE_TTL_SECONDS = 45
+BANANALAB_UPSTREAM_DEGRADED_WINDOW_SECONDS = 1800
+BANANALAB_UPSTREAM_DEGRADED_MIN_ERRORS = 2
+USER_STATUS_LOOKBACK_HOURS = 24
 
 
 def get_fallback_model(model_name: Optional[str]) -> Optional[str]:
@@ -309,6 +322,48 @@ def _paused_duration_seconds() -> Optional[int]:
         return max(0, int((datetime.utcnow() - started).total_seconds()))
     except ValueError:
         return None
+
+
+def _mark_bananalab_upstream_degraded(error_message: str) -> None:
+    now = datetime.utcnow().isoformat()
+    bananalab_runtime_state["last_upstream_error_at"] = now
+    bananalab_runtime_state["last_upstream_error_message"] = (error_message or "")[:500]
+    bananalab_runtime_state["upstream_error_count"] = int(bananalab_runtime_state.get("upstream_error_count") or 0) + 1
+    if not bananalab_runtime_state.get("upstream_degraded_since"):
+        bananalab_runtime_state["upstream_degraded_since"] = now
+
+
+def _clear_bananalab_upstream_degraded() -> None:
+    bananalab_runtime_state["upstream_error_count"] = 0
+    bananalab_runtime_state["upstream_degraded_since"] = None
+    bananalab_runtime_state["last_upstream_error_message"] = None
+
+
+def _upstream_degraded_duration_seconds() -> Optional[int]:
+    since = bananalab_runtime_state.get("upstream_degraded_since")
+    if not since:
+        return None
+    try:
+        started = datetime.fromisoformat(str(since))
+        return max(0, int((datetime.utcnow() - started).total_seconds()))
+    except ValueError:
+        return None
+
+
+def _bananalab_is_upstream_degraded() -> bool:
+    last_upstream = bananalab_runtime_state.get("last_upstream_error_at")
+    last_success = bananalab_runtime_state.get("last_success_at")
+    error_count = int(bananalab_runtime_state.get("upstream_error_count") or 0)
+    if error_count < BANANALAB_UPSTREAM_DEGRADED_MIN_ERRORS or not last_upstream:
+        return False
+    if last_success and str(last_success) >= str(last_upstream):
+        return False
+    try:
+        started = datetime.fromisoformat(str(last_upstream))
+        age = (datetime.utcnow() - started).total_seconds()
+    except ValueError:
+        return False
+    return age <= BANANALAB_UPSTREAM_DEGRADED_WINDOW_SECONDS
 
 
 def _queue_size() -> int:
@@ -696,6 +751,7 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                     bananalab_runtime_state["last_success_at"] = datetime.utcnow().isoformat()
                     _clear_bananalab_paused()
                     _clear_bananalab_unavailable()
+                    _clear_bananalab_upstream_degraded()
                 if generation.generation_metadata and generation.generation_metadata.get("paused_request_data"):
                     generation.generation_metadata.pop("paused_request_data", None)
                 logger.info(
@@ -876,6 +932,10 @@ def process_generation_async(generation_id: int, user_id: int, request_data: dic
                     error_message = error_message[:2000] + "... (сообщение обрезано)"
 
                 generation.generation_metadata['error'] = error_message
+                if provider == "bananalab" and is_bananalab_upstream_internal_error_message(
+                    last_raw_error or error_message
+                ):
+                    _mark_bananalab_upstream_degraded(last_raw_error or error_message)
 
                 # ВАЖНО: Уведомляем SQLAlchemy об изменении JSON поля
                 from sqlalchemy.orm.attributes import flag_modified
@@ -1309,44 +1369,203 @@ async def get_available_models(
     }
 
 
-@router.get("/bananahub-health")
-async def get_bananahub_health():
-    """Публичный статус Moonez API — для баннера на главной без авторизации."""
+def _load_user_generation_status(user_id: int) -> Dict[str, Any]:
+    since = datetime.utcnow() - timedelta(hours=USER_STATUS_LOOKBACK_HOURS)
+    with db_service.get_session() as session:
+        rows = (
+            session.query(Generation)
+            .filter(
+                Generation.user_id == user_id,
+                Generation.created_at >= since,
+                Generation.status.in_(("completed", "failed")),
+            )
+            .order_by(Generation.created_at.desc())
+            .limit(USER_STATUS_SAMPLE_SIZE)
+            .all()
+        )
+    payload_rows = []
+    for gen in rows:
+        meta = gen.generation_metadata or {}
+        payload_rows.append(
+            {
+                "id": gen.id,
+                "status": gen.status,
+                "error": meta.get("error"),
+                "provider": meta.get("provider"),
+                "created_at": gen.created_at.isoformat() if gen.created_at else None,
+            }
+        )
+    return build_user_generation_status(payload_rows)
+
+
+def _merge_user_into_service_status(
+    payload: Dict[str, Any],
+    user_status: Dict[str, Any],
+) -> None:
+    services = list(payload.get("services") or [])
+    services.append(
+        {
+            "id": "your_account",
+            "name": "Ваши генерации",
+            "short_name": "Вы",
+            "state": user_status.get("state"),
+            "message": user_status.get("message"),
+            "source": "user_history",
+            "stats": {
+                "recent_total": user_status.get("recent_total"),
+                "recent_failed": user_status.get("recent_failed"),
+                "recent_success": user_status.get("recent_success"),
+                "fail_streak": user_status.get("fail_streak"),
+            },
+        }
+    )
+    payload["services"] = services
+    payload["user"] = user_status
+
+    user_state = str(user_status.get("state") or "unknown")
+    overall_state = str(payload.get("state") or "unknown")
+    overall_message = str(payload.get("message") or "")
+
+    if user_state in ("degraded", "failing", "unavailable", "paused"):
+        user_message = str(user_status.get("message") or "")
+        if overall_state == "ok":
+            payload["state"] = "degraded" if user_state == "failing" else user_state
+            payload["message"] = user_message
+        elif overall_state == "degraded" and user_message:
+            payload["message"] = f"{overall_message} {user_message}"
+        payload["can_generate"] = bool(payload.get("can_generate")) and bool(
+            user_status.get("can_generate", True)
+        )
+
+
+def _build_public_service_status(user_id: Optional[int] = None) -> Dict[str, Any]:
+    """Сводный статус для баннера: Moonez + Google Gemini + итог (+ пользователь)."""
+    google_status = get_google_gemini_status()
     reachable, probe_error = _bananalab_health_status()
     is_unavailable = not reachable or _bananalab_is_unavailable()
     is_paused = (not is_unavailable) and _bananalab_is_paused()
+    is_runtime_degraded = _bananalab_is_upstream_degraded()
+    google_incident = bool(google_status.get("has_active_incident"))
+    active_google = (google_status.get("active_incidents") or [{}])[0] if google_incident else None
 
     if is_unavailable:
-        duration_hint = _format_duration_hint(_unavailable_duration_seconds(), "Недоступен уже")
-        base_message = probe_error or bananalab_runtime_state.get("last_unavailable_error") or (
+        hub_state = "unavailable"
+        hub_message = probe_error or bananalab_runtime_state.get("last_unavailable_error") or (
             "Moonez API недоступен: сервер провайдера не отвечает. "
             "Проверьте панель https://moonez.ai и IP whitelist."
         )
-        return {
-            "provider": "bananalab",
-            "state": "unavailable",
-            "can_generate": False,
-            "message": base_message + duration_hint,
-        }
+        hub_message += _format_duration_hint(_unavailable_duration_seconds(), "Недоступен уже")
+    elif is_paused:
+        hub_state = "paused"
+        hub_message = (
+            f"Moonez: проект на паузе у провайдера.{_format_duration_hint(_paused_duration_seconds(), 'На паузе уже')} "
+            f"Задач в очереди: {_queue_size()}."
+        )
+    else:
+        hub_state = "ok"
+        hub_message = "Moonez API принимает запросы и создаёт задачи."
 
-    if is_paused:
-        duration_hint = _format_duration_hint(_paused_duration_seconds(), "На паузе уже")
-        return {
-            "provider": "bananalab",
-            "state": "paused",
-            "can_generate": False,
-            "message": (
-                f"Moonez: проект на паузе у провайдера.{duration_hint} "
-                f"Задач в очереди: {_queue_size()}. Автоповтор включён."
-            ),
-        }
+    if google_incident and active_google:
+        gemini_state = "incident"
+        gemini_message = active_google.get("title") or "Google сообщает об инциденте Gemini / Vertex AI."
+        gemini_source = "google_official"
+    elif is_runtime_degraded:
+        gemini_state = "degraded"
+        degraded_hint = _format_duration_hint(_upstream_degraded_duration_seconds(), "Нестабильно уже")
+        gemini_message = (
+            "Google upstream возвращает internal error — генерации могут не пройти."
+            + degraded_hint
+        )
+        gemini_source = "runtime_probe"
+    elif google_status.get("fetch_ok"):
+        gemini_state = "ok"
+        gemini_message = "Официальных инцидентов Google Gemini нет. Наблюдение на сервере — норма."
+        gemini_source = "google_official"
+    else:
+        gemini_state = "unknown"
+        gemini_message = "Не удалось проверить status.cloud.google.com — смотрим только наш мониторинг."
+        gemini_source = "runtime_probe"
 
-    return {
+    if is_unavailable or is_paused:
+        overall_state = hub_state
+        can_generate = False
+        overall_message = hub_message
+    elif gemini_state in ("incident", "degraded"):
+        overall_state = "degraded"
+        can_generate = True
+        overall_message = (
+            "Генерация возможна, но Google upstream нестабилен — попробуйте позже или повторите запрос."
+        )
+    else:
+        overall_state = "ok"
+        can_generate = True
+        overall_message = "Все системы в норме — можно генерировать."
+
+    services = [
+        {
+            "id": "bananahub",
+            "name": "Moonez API",
+            "short_name": "Moonez",
+            "state": hub_state,
+            "message": hub_message,
+            "source": "health_probe",
+        },
+        {
+            "id": "google_gemini",
+            "name": "Google Gemini",
+            "short_name": "Google AI",
+            "state": gemini_state,
+            "message": gemini_message,
+            "source": gemini_source,
+            "status_page_url": google_status.get("status_page_url"),
+            "active_incidents": google_status.get("active_incidents") or [],
+        },
+    ]
+
+    payload = {
         "provider": "bananalab",
-        "state": "ok",
-        "can_generate": True,
-        "message": "Moonez: генерация доступна.",
+        "state": overall_state,
+        "can_generate": can_generate,
+        "message": overall_message,
+        "updated_at": datetime.utcnow().isoformat(),
+        "services": services,
+        "google_status": {
+            "checked_at": google_status.get("checked_at"),
+            "fetch_ok": google_status.get("fetch_ok"),
+            "fetch_error": google_status.get("fetch_error"),
+            "has_active_incident": google_incident,
+            "status_page_url": google_status.get("status_page_url"),
+        },
+        "runtime": {
+            "last_success_at": bananalab_runtime_state.get("last_success_at"),
+            "last_upstream_error_at": bananalab_runtime_state.get("last_upstream_error_at"),
+            "upstream_error_count": bananalab_runtime_state.get("upstream_error_count"),
+            "upstream_degraded": is_runtime_degraded,
+        },
     }
+
+    if user_id is not None:
+        _merge_user_into_service_status(payload, _load_user_generation_status(user_id))
+
+    return payload
+
+
+@router.get("/bananahub-health")
+async def get_bananahub_health(
+    user: Annotated[Optional[TokenPayload], Depends(auth_service.get_optional_user)] = None,
+):
+    """Публичный статус BananaHub + Google Gemini — баннер под шапкой без авторизации."""
+    user_id = user.user_id if user else None
+    return _build_public_service_status(user_id=user_id)
+
+
+@router.get("/service-status")
+async def get_service_status(
+    user: Annotated[Optional[TokenPayload], Depends(auth_service.get_optional_user)] = None,
+):
+    """Статус сервисов; для авторизованных добавляет карточку «Ваши генерации»."""
+    user_id = user.user_id if user else None
+    return _build_public_service_status(user_id=user_id)
 
 
 @router.get("/provider-status")
@@ -1443,6 +1662,13 @@ async def get_provider_status(
             f"Задач в очереди: {queue_size}. Автоповтор включён."
         )
         state = "paused"
+    elif _bananalab_is_upstream_degraded() or get_google_gemini_status().get("has_active_incident"):
+        duration_hint = _format_duration_hint(_upstream_degraded_duration_seconds(), "Нестабильно уже")
+        message = (
+            "Google Gemini upstream нестабилен — генерации могут падать."
+            + duration_hint
+        )
+        state = "degraded"
     else:
         message = "Moonez: генерация доступна."
         state = "ok"
@@ -1450,7 +1676,7 @@ async def get_provider_status(
     return {
         "provider": "bananalab",
         "state": state,
-        "can_generate": state == "ok",
+        "can_generate": state in ("ok", "degraded"),
         "message": message,
         "paused_queue_size": queue_size,
         "last_paused_at": last_paused_at,

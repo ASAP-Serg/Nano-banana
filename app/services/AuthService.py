@@ -145,5 +145,17 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+    async def get_optional_user(
+        self,
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(oauth2_scheme),
+    ) -> Optional[TokenPayload]:
+        """Текущий пользователь, если передан Bearer; иначе None (без 401)."""
+        if credentials is None:
+            return None
+        try:
+            return await self.get_current_user(credentials)
+        except HTTPException:
+            return None
+
 auth_service = AuthService()
 

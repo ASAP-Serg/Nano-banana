@@ -92,17 +92,35 @@
         </div>
     </nav>
 
+    <!-- Статус сервисов (BananaHub + Google Gemini) -->
+    <section id="serviceStatusBar" class="service-status-bar service-status-bar--checking" aria-live="polite">
+        <div class="container-fluid px-3 px-lg-4">
+            <div class="service-status-bar__inner">
+                <div class="service-status-bar__head">
+                    <div class="service-status-bar__title-wrap">
+                        <span class="service-status-bar__pulse" id="serviceStatusPulse" aria-hidden="true"></span>
+                        <div>
+                            <div class="service-status-bar__title">Статус сервисов</div>
+                            <div class="service-status-bar__subtitle" id="serviceStatusSummary">Проверяем BananaHub и Google Gemini…</div>
+                        </div>
+                    </div>
+                    <a class="service-status-bar__link" id="serviceStatusGoogleLink" href="https://status.cloud.google.com/" target="_blank" rel="noopener noreferrer">
+                        Google Cloud Status
+                        <i class="fas fa-external-link-alt ms-1"></i>
+                    </a>
+                </div>
+                <div class="service-status-bar__grid" id="serviceStatusGrid"></div>
+            </div>
+        </div>
+    </section>
+
     <main class="container-fluid my-4">
-        <div class="row g-4 justify-content-center mt-5">
+        <div class="row g-4 justify-content-center mt-3">
             <!-- Генератор -->
             <div class="col-lg-4">
                 <div class="card shadow h-100">
                     <div class="card-header">
                         <h5 class="mb-0"><i class="fas fa-magic me-2"></i>Генерация изображения</h5>
-                        <div id="providerStateBanner" class="alert alert-secondary py-2 px-3 mt-2 mb-0 small" style="display: none;">
-                            <i class="fas fa-server me-2"></i>
-                            <span id="providerStateText">Проверка состояния провайдера...</span>
-                        </div>
                     </div>
                     <div class="card-body">
                         <form id="generateForm">

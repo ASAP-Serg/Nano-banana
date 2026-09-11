@@ -166,6 +166,17 @@ BANANALAB_EMPTY_DONE_RETRY_MESSAGE = (
 )
 
 
+def is_bananalab_upstream_internal_error_message(text: Any) -> bool:
+    """Google Gemini upstream вернул internal/500 — временная деградация."""
+    lower = str(text or "").lower()
+    return (
+        "upstream provider internal error" in lower
+        or "upstream internal error" in lower
+        or ("internal error" in lower and "upstream" in lower)
+        or ("generation failed" in lower and "internal error" in lower)
+    )
+
+
 def _looks_like_html(text: str) -> bool:
     lower = text.lower()
     return any(

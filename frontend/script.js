@@ -1560,44 +1560,144 @@ async function adminInsertToForm(id) {
     }
 }
 
-async function loadProviderStatus() {
-    const banner = document.getElementById('providerStateBanner');
-    const text = document.getElementById('providerStateText');
-    if (!banner || !text) return;
+const SERVICE_STATUS_LABELS = {
+    ok: 'Работает',
+    degraded: 'Нестабильно',
+    failing: 'Не проходит',
+    incident: 'Инцидент',
+    unavailable: 'Недоступен',
+    paused: 'На паузе',
+    unknown: 'Неизвестно',
+    checking: 'Проверка…',
+};
 
+const SERVICE_STATUS_BAR_CLASS = {
+    ok: 'service-status-bar--ok',
+    degraded: 'service-status-bar--degraded',
+    failing: 'service-status-bar--degraded',
+    incident: 'service-status-bar--incident',
+    unavailable: 'service-status-bar--unavailable',
+    paused: 'service-status-bar--paused',
+    unknown: 'service-status-bar--unknown',
+    checking: 'service-status-bar--checking',
+};
+
+function serviceStatusIconSvg(serviceId) {
+    if (serviceId === 'your_account') {
+        return `
+            <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+                <circle cx="24" cy="24" r="22" fill="currentColor" opacity="0.12"></circle>
+                <circle cx="24" cy="18" r="7" fill="currentColor"></circle>
+                <path fill="currentColor" d="M10 40c2.5-7 7.5-10 14-10s11.5 3 14 10H10z"></path>
+            </svg>`;
+    }
+    if (serviceId === 'google_gemini') {
+        return `
+            <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+                <circle cx="24" cy="24" r="22" fill="currentColor" opacity="0.12"></circle>
+                <path fill="#4285F4" d="M24 8c4.6 0 8.8 1.6 12.1 4.3l-5.7 5.7A9.8 9.8 0 0 0 24 13.5c-3.4 0-6.4 1.7-8.2 4.3l-5.7-5.7C12.2 9.6 17.8 8 24 8z"/>
+                <path fill="#34A853" d="M41.9 24c0 1.6-.2 3.1-.7 4.6H24v-9.8h10.1c.5 1.5.8 3.1.8 4.8 0 .1 0 .3 0 .4z"/>
+                <path fill="#FBBC05" d="M24 41.9c-5.6 0-10.4-3.2-12.8-7.8l5.7-5.7c1.2 2.1 3.4 3.5 7.1 3.5 2.2 0 4.1-.8 5.6-2.1l5.7 5.7c-3.3 3.1-7.7 5-11.3 5.4z"/>
+                <path fill="#EA4335" d="M11.2 24c0-1.7.4-3.3 1.1-4.8L24 24V13.5c3.7 0 6.9 1.4 9.4 3.7l5.7-5.7C32.8 9.6 28.6 8 24 8 17.8 8 12.2 9.6 8 13.5l3.2 5.7c1.8-2.6 4.8-4.3 8.2-4.3V24h-8.2z"/>
+            </svg>`;
+    }
+    return `
+        <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+            <circle cx="24" cy="24" r="22" fill="currentColor" opacity="0.12"></circle>
+            <path fill="currentColor" d="M24 10c-2.2 0-4 1.8-4 4v2h-4c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V18c0-1.1-.9-2-2-2h-4v-2c0-2.2-1.8-4-4-4zm0 3c.6 0 1 .4 1 1v2h-2v-2c0-.6.4-1 1-1zm-7 7h14v14H17V20z"/>
+            <path fill="currentColor" opacity="0.85" d="M20 24h8v2h-8zm0-3h8v2h-8z"/>
+        </svg>`;
+}
+
+function renderServiceStatusCard(service) {
+    const state = service.state || 'unknown';
+    const label = SERVICE_STATUS_LABELS[state] || state;
+    const sourceHint = service.source === 'google_official'
+        ? 'Официальный status.cloud.google.com'
+        : (service.source === 'user_history'
+            ? 'Ваши последние генерации за 24 ч'
+            : (service.source === 'runtime_probe' ? 'Мониторинг ooneclickk' : 'Health-check API'));
+    const link = service.status_page_url
+        ? `<a class="service-status-card__link" href="${service.status_page_url}" target="_blank" rel="noopener noreferrer">Подробнее</a>`
+        : '';
+    const stats = service.stats;
+    const statsHint = stats && stats.recent_total
+        ? ` · ${stats.recent_success}/${stats.recent_total} успешных`
+        : '';
+
+    return `
+        <article class="service-status-card service-status-card--${state}">
+            <div class="service-status-card__icon">${serviceStatusIconSvg(service.id)}</div>
+            <div class="service-status-card__body">
+                <div class="service-status-card__row">
+                    <h3 class="service-status-card__name">${service.short_name || service.name}</h3>
+                    <span class="service-status-card__badge">${label}</span>
+                </div>
+                <p class="service-status-card__message">${service.message || ''}</p>
+                <div class="service-status-card__meta">${sourceHint}${statsHint}${link ? ` · ${link}` : ''}</div>
+            </div>
+        </article>`;
+}
+
+function applyServiceStatusBar(data) {
+    const bar = document.getElementById('serviceStatusBar');
+    const summary = document.getElementById('serviceStatusSummary');
+    const grid = document.getElementById('serviceStatusGrid');
+    const googleLink = document.getElementById('serviceStatusGoogleLink');
+    if (!bar || !summary || !grid) return;
+
+    const overallState = data?.state || 'unknown';
+    Object.values(SERVICE_STATUS_BAR_CLASS).forEach((cls) => bar.classList.remove(cls));
+    bar.classList.add(SERVICE_STATUS_BAR_CLASS[overallState] || SERVICE_STATUS_BAR_CLASS.unknown);
+
+    summary.textContent = data?.message || 'Статус сервисов обновлён.';
+    const services = Array.isArray(data?.services) ? data.services : [];
+    grid.classList.toggle('service-status-bar__grid--triple', services.length >= 3);
+    grid.innerHTML = services.length
+        ? services.map(renderServiceStatusCard).join('')
+        : '<div class="service-status-card service-status-card--unknown"><div class="service-status-card__body"><p class="service-status-card__message mb-0">Нет данных о сервисах.</p></div></div>';
+
+    if (googleLink && data?.google_status?.status_page_url) {
+        googleLink.href = data.google_status.status_page_url;
+    }
+
+    bar.dataset.canGenerate = data?.can_generate ? '1' : '0';
+    bar.dataset.hasUserStatus = data?.user ? '1' : '0';
+}
+
+async function loadProviderStatus() {
     const modelName = document.getElementById('modelName')?.value || 'nano-banana-pro';
-    const url = authToken
-        ? `${API_URL}/images/provider-status?model_name=${encodeURIComponent(modelName)}`
-        : `${API_URL}/images/bananahub-health`;
+    const url = `${API_URL}/images/service-status`;
     const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
 
     try {
-        const response = await fetch(url, { headers });
+        const response = await fetch(url, { headers, cache: 'no-store' });
         if (!response.ok) return;
         const data = await response.json();
-        if (authToken) {
-            serverStoredProvider = data.provider || resolveProviderForModel(modelName);
-        }
-        banner.style.display = 'block';
+        applyServiceStatusBar(data);
 
-        if (data.state === 'unavailable') {
-            banner.className = 'alert alert-danger py-2 px-3 mt-2 mb-0 small';
-            text.textContent = data.message || 'Moonez API недоступен: сервер провайдера не отвечает.';
-        } else if (data.state === 'paused') {
-            banner.className = 'alert alert-warning py-2 px-3 mt-2 mb-0 small';
-            text.textContent = data.message || 'Moonez: проект на паузе у провайдера.';
-        } else if (data.state === 'ok') {
-            banner.className = 'alert alert-success py-2 px-3 mt-2 mb-0 small';
-            text.textContent = data.message || 'Провайдер доступен, можно генерировать.';
-        } else if (data.state === 'unknown' && authToken) {
-            banner.className = 'alert alert-secondary py-2 px-3 mt-2 mb-0 small';
-            text.textContent = data.message || 'Введите API ключ в настройках, чтобы определить состояние провайдера.';
-        } else {
-            banner.className = 'alert alert-secondary py-2 px-3 mt-2 mb-0 small';
-            text.textContent = data.message || 'Состояние провайдера неизвестно.';
+        if (authToken) {
+            try {
+                const providerResp = await fetch(
+                    `${API_URL}/images/provider-status?model_name=${encodeURIComponent(modelName)}`,
+                    { headers, cache: 'no-store' }
+                );
+                if (providerResp.ok) {
+                    const providerData = await providerResp.json();
+                    serverStoredProvider = providerData.provider || resolveProviderForModel(modelName);
+                }
+            } catch (providerErr) {
+                console.warn('[PROVIDER_STATUS] provider-status:', providerErr);
+            }
         }
     } catch (error) {
-        console.warn('[PROVIDER_STATUS] Ошибка получения статуса провайдера:', error);
+        console.warn('[PROVIDER_STATUS] Ошибка получения статуса сервисов:', error);
+        applyServiceStatusBar({
+            state: 'unknown',
+            can_generate: true,
+            message: 'Не удалось обновить статус — попробуйте обновить страницу.',
+            services: [],
+        });
     }
 }
 
@@ -1716,10 +1816,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 5000);
 
-    // Отдельный цикл обновления состояния провайдера
+    // Статус BananaHub + Google Gemini под шапкой
     setInterval(async () => {
         await loadProviderStatus();
-    }, 8000);
+    }, 30000);
 });
 
 // Настройка визуальных индикаторов соотношений сторон
@@ -1860,6 +1960,7 @@ async function loadUserInfo() {
             // Загружаем галерею после успешной загрузки пользователя
             console.log('[AUTH] Загружаем галерею после успешной аутентификации...');
             await loadGallery();
+            await loadProviderStatus();
         } else {
             console.error('[AUTH] Ошибка загрузки пользователя, статус:', response.status);
             clearStoredAuthToken();
@@ -2404,6 +2505,7 @@ async function handleGenerate(e) {
         setTimeout(async () => {
             console.log('[GENERATE] Загружаем галерею после генерации...');
             await loadGallery();
+            await loadProviderStatus();
         }, 800);
         
         // Продолжаем обновлять галерею каждые 2 секунды для активных генераций
@@ -2431,8 +2533,8 @@ async function handleGenerate(e) {
                         if (activeCount === 0) {
                             console.log('[GENERATE] Все генерации завершены, останавливаем проверку');
                             clearInterval(checkInterval);
-                            // Финальное обновление галереи
                             await loadGallery();
+                            await loadProviderStatus();
                         }
                     } else {
                         // Если ошибка, пробуем без параметров
@@ -2450,6 +2552,7 @@ async function handleGenerate(e) {
                                 console.log('[GENERATE] Все генерации завершены, останавливаем проверку');
                                 clearInterval(checkInterval);
                                 await loadGallery();
+                                await loadProviderStatus();
                             }
                         }
                     }
@@ -2706,6 +2809,7 @@ function handleLogout() {
     showLoginButton();
     showAdminPanel(false);
     loadGallery();
+    loadProviderStatus();
     showToast('Выход выполнен', 'info');
 }
 
