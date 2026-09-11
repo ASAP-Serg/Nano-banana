@@ -663,6 +663,15 @@ body {
 }
 
 /* Стили для навбара */
+.navbar {
+    position: relative;
+    z-index: 1030;
+}
+
+.navbar .dropdown-menu {
+    z-index: 1031;
+}
+
 .navbar-dark {
     background-color: rgba(9, 9, 11, 0.82) !important;
     backdrop-filter: blur(10px);
@@ -1252,9 +1261,10 @@ button.info-btn:hover,
 
 /* --- Service status bar (under navbar) --- */
 .service-status-bar {
+    position: relative;
+    z-index: 1;
     border-bottom: 1px solid var(--border);
     background: linear-gradient(180deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.02));
-    backdrop-filter: blur(8px);
 }
 
 .service-status-bar__inner {
