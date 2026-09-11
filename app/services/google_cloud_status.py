@@ -74,7 +74,7 @@ def _normalize_incident(incident: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _fetch_incidents() -> List[Dict[str, Any]]:
-    resp = requests.get(_INCIDENTS_URL, timeout=12)
+    resp = requests.get(_INCIDENTS_URL, timeout=3)
     resp.raise_for_status()
     data = resp.json()
     if not isinstance(data, list):

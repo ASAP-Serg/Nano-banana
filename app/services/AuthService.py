@@ -154,7 +154,8 @@ class AuthService:
             return None
         try:
             return await self.get_current_user(credentials)
-        except HTTPException:
+        except Exception as exc:
+            logger.debug("[AUTH] optional user ignored: %s", exc)
             return None
 
 auth_service = AuthService()

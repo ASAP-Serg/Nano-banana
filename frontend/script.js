@@ -1708,7 +1708,7 @@ async function fetchServiceStatusPayload(headers) {
 
     for (const url of urls) {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 25000);
         try {
             const response = await fetch(url, {
                 headers,
@@ -1734,7 +1734,6 @@ async function fetchServiceStatusPayload(headers) {
 
 async function loadProviderStatus() {
     const modelName = document.getElementById('modelName')?.value || 'nano-banana-pro';
-    const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
     const summary = document.getElementById('serviceStatusSummary');
     const bar = document.getElementById('serviceStatusBar');
     if (summary) {
@@ -1745,14 +1744,27 @@ async function loadProviderStatus() {
     }
 
     try {
-        const { data } = await fetchServiceStatusPayload(headers);
+        // Публичный статус — без Authorization (старый/битый JWT не ломает запрос)
+        const { data } = await fetchServiceStatusPayload({});
         applyServiceStatusBar(data);
 
         if (authToken) {
             try {
+                const { data: userData } = await fetchServiceStatusPayload({
+                    Authorization: `Bearer ${authToken}`,
+                });
+                applyServiceStatusBar(userData);
+            } catch (userStatusErr) {
+                console.warn('[PROVIDER_STATUS] user status skipped:', userStatusErr);
+            }
+
+            try {
                 const providerResp = await fetch(
                     `${API_URL}/images/provider-status?model_name=${encodeURIComponent(modelName)}`,
-                    { headers, cache: 'no-store' }
+                    {
+                        headers: { Authorization: `Bearer ${authToken}` },
+                        cache: 'no-store',
+                    }
                 );
                 if (providerResp.ok) {
                     const providerData = await providerResp.json();
@@ -1764,17 +1776,20 @@ async function loadProviderStatus() {
         }
     } catch (error) {
         console.warn('[PROVIDER_STATUS] Ошибка получения статуса сервисов:', error);
+        const hint = error && error.name === 'AbortError'
+            ? 'Таймаут ответа API (>25 сек). Сервер долго отвечает — попробуйте через минуту.'
+            : 'Не удалось связаться с /api/v1/images/service-status. Обновите страницу (Ctrl+F5).';
         applyServiceStatusBar({
             state: 'unknown',
             can_generate: true,
-            message: 'Не удалось обновить статус Moonez — обновите страницу или проверьте API.',
+            message: hint,
             services: [
                 {
                     id: 'moonez',
                     name: 'Moonez API',
                     short_name: 'Moonez',
                     state: 'unknown',
-                    message: 'Статус не получен. Если так и висит — на сервере старая версия или API недоступен.',
+                    message: String(error?.message || 'Запрос статуса не прошёл из браузера'),
                     source: 'health_probe',
                 },
             ],
