@@ -1582,6 +1582,31 @@ const SERVICE_STATUS_BAR_CLASS = {
     checking: 'service-status-bar--checking',
 };
 
+function escapeHtml(text) {
+    return String(text ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function normalizeServiceStatusPayload(data) {
+    const payload = data && typeof data === 'object' ? { ...data } : {};
+    if (!Array.isArray(payload.services) || !payload.services.length) {
+        payload.services = [
+            {
+                id: 'moonez',
+                name: 'Moonez API',
+                short_name: 'Moonez',
+                state: payload.state || 'unknown',
+                message: payload.message || 'Статус Moonez API',
+                source: 'health_probe',
+            },
+        ];
+    }
+    return payload;
+}
+
 function serviceStatusIconSvg(serviceId) {
     if (serviceId === 'your_account') {
         return `
@@ -1589,6 +1614,15 @@ function serviceStatusIconSvg(serviceId) {
                 <circle cx="24" cy="24" r="22" fill="currentColor" opacity="0.12"></circle>
                 <circle cx="24" cy="18" r="7" fill="currentColor"></circle>
                 <path fill="currentColor" d="M10 40c2.5-7 7.5-10 14-10s11.5 3 14 10H10z"></path>
+            </svg>`;
+    }
+    if (serviceId === 'moonez' || serviceId === 'bananahub') {
+        return `
+            <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
+                <circle cx="24" cy="24" r="22" fill="currentColor" opacity="0.12"></circle>
+                <path fill="currentColor" d="M14 30c2-6 6-9 10-9s8 3 10 9H14z"></path>
+                <ellipse cx="24" cy="19" rx="10" ry="7" fill="currentColor"></ellipse>
+                <path fill="currentColor" opacity="0.35" d="M18 17c1.5-2 3.5-3 6-3" stroke="currentColor" stroke-width="1.5" fill="none"></path>
             </svg>`;
     }
     if (serviceId === 'google_gemini') {
@@ -1630,11 +1664,11 @@ function renderServiceStatusCard(service) {
             <div class="service-status-card__icon">${serviceStatusIconSvg(service.id)}</div>
             <div class="service-status-card__body">
                 <div class="service-status-card__row">
-                    <h3 class="service-status-card__name">${service.short_name || service.name}</h3>
-                    <span class="service-status-card__badge">${label}</span>
+                    <h3 class="service-status-card__name">${escapeHtml(service.short_name || service.name)}</h3>
+                    <span class="service-status-card__badge">${escapeHtml(label)}</span>
                 </div>
-                <p class="service-status-card__message">${service.message || ''}</p>
-                <div class="service-status-card__meta">${sourceHint}${statsHint}${link ? ` · ${link}` : ''}</div>
+                <p class="service-status-card__message">${escapeHtml(service.message || '')}</p>
+                <div class="service-status-card__meta">${escapeHtml(sourceHint)}${escapeHtml(statsHint)}${link ? ` · ${link}` : ''}</div>
             </div>
         </article>`;
 }
@@ -1665,15 +1699,53 @@ function applyServiceStatusBar(data) {
     bar.dataset.hasUserStatus = data?.user ? '1' : '0';
 }
 
+async function fetchServiceStatusPayload(headers) {
+    const urls = [
+        `${API_URL}/images/service-status`,
+        `${API_URL}/images/bananahub-health`,
+    ];
+    let lastError = null;
+
+    for (const url of urls) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        try {
+            const response = await fetch(url, {
+                headers,
+                cache: 'no-store',
+                signal: controller.signal,
+            });
+            if (!response.ok) {
+                lastError = new Error(`HTTP ${response.status} for ${url}`);
+                continue;
+            }
+            const data = normalizeServiceStatusPayload(await response.json());
+            return { data, url };
+        } catch (error) {
+            lastError = error;
+            console.warn('[PROVIDER_STATUS] Ошибка запроса', url, error);
+        } finally {
+            clearTimeout(timeoutId);
+        }
+    }
+
+    throw lastError || new Error('Не удалось получить статус сервисов');
+}
+
 async function loadProviderStatus() {
     const modelName = document.getElementById('modelName')?.value || 'nano-banana-pro';
-    const url = `${API_URL}/images/service-status`;
     const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+    const summary = document.getElementById('serviceStatusSummary');
+    const bar = document.getElementById('serviceStatusBar');
+    if (summary) {
+        summary.textContent = 'Проверяем Moonez и Google Gemini…';
+    }
+    if (bar) {
+        bar.classList.add('service-status-bar--checking');
+    }
 
     try {
-        const response = await fetch(url, { headers, cache: 'no-store' });
-        if (!response.ok) return;
-        const data = await response.json();
+        const { data } = await fetchServiceStatusPayload(headers);
         applyServiceStatusBar(data);
 
         if (authToken) {
@@ -1695,8 +1767,17 @@ async function loadProviderStatus() {
         applyServiceStatusBar({
             state: 'unknown',
             can_generate: true,
-            message: 'Не удалось обновить статус — попробуйте обновить страницу.',
-            services: [],
+            message: 'Не удалось обновить статус Moonez — обновите страницу или проверьте API.',
+            services: [
+                {
+                    id: 'moonez',
+                    name: 'Moonez API',
+                    short_name: 'Moonez',
+                    state: 'unknown',
+                    message: 'Статус не получен. Если так и висит — на сервере старая версия или API недоступен.',
+                    source: 'health_probe',
+                },
+            ],
         });
     }
 }
@@ -1816,7 +1897,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 5000);
 
-    // Статус BananaHub + Google Gemini под шапкой
+    // Статус Moonez + Google Gemini под шапкой
     setInterval(async () => {
         await loadProviderStatus();
     }, 30000);

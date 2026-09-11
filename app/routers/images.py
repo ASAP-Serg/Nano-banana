@@ -1503,7 +1503,7 @@ def _build_public_service_status(user_id: Optional[int] = None) -> Dict[str, Any
 
     services = [
         {
-            "id": "bananahub",
+            "id": "moonez",
             "name": "Moonez API",
             "short_name": "Moonez",
             "state": hub_state,
