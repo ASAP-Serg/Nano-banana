@@ -37,7 +37,10 @@ jobs:
           docker build -f deploy/docker/Dockerfile.web -t nano-banana-web:${{ github.sha }} .
 
   deploy:
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    if: >
+      github.repository == 'ASAP-Serg/Nano-banana' &&
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
     needs: test
     runs-on: ubuntu-latest
     steps:
