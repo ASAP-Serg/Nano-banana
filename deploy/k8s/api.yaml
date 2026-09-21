@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nano-banana-api
+  namespace: nano-banana
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nano-banana-api
+  template:
+    metadata:
+      labels:
+        app: nano-banana-api
+    spec:
+      containers:
+        - name: api
+          image: cr.yandex/<registry>/nano-banana-backend:latest
+          args: ["uvicorn", "nano_banana_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: nano-banana-config
+            - secretRef:
+                name: nano-banana-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nano-banana-api
+  namespace: nano-banana
+spec:
+  selector:
+    app: nano-banana-api
+  ports:
+    - port: 8000
+      targetPort: 8000

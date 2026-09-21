@@ -1,54 +1,14 @@
-# Git
 .git
 .gitignore
-
-# Python
 __pycache__
 *.pyc
-*.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info
-dist
-build
-
-# Virtual environments
-venv/
-env/
-.venv/
-ENV/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Docker
-# docker-compose.yml - не нужен в образе (используется только для запуска)
-# Dockerfile - нужен для сборки, не игнорируем
-.dockerignore
-
-# Documentation
+.venv
+venv
+.env
+logs
 *.md
 !README.md
-
-# Environment
-.env
-.env.local
-
-# Data
-*.db
-*.sqlite
-backup/
-
-# Logs
-*.log
-
+apps/web/node_modules
+apps/web/dist
+.pytest_cache
+tests

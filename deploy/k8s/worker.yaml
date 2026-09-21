@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nano-banana-worker
+  namespace: nano-banana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nano-banana-worker
+  template:
+    metadata:
+      labels:
+        app: nano-banana-worker
+    spec:
+      containers:
+        - name: worker
+          image: cr.yandex/<registry>/nano-banana-backend:latest
+          args: ["python", "-m", "nano_banana_worker"]
+          envFrom:
+            - configMapRef:
+                name: nano-banana-config
+            - secretRef:
+                name: nano-banana-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - import os, redis; redis.from_url(os.environ["REDIS_URL"]).ping()
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi

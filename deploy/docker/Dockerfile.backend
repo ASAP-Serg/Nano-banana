@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY packages/core /app/packages/core
+COPY apps/api /app/apps/api
+COPY apps/worker /app/apps/worker
+COPY alembic /app/alembic
+COPY alembic.ini /app/alembic.ini
+
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin app \
+    && chown -R app:app /app
+
+ENV PYTHONPATH=/app/packages/core:/app/apps/api:/app/apps/worker
+ENV PYTHONUNBUFFERED=1
+ENV LOGS_DIR=/tmp/nano-banana-logs
+
+USER 10001
+
+EXPOSE 8000
+
+CMD ["uvicorn", "nano_banana_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

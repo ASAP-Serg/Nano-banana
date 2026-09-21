@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nano-banana-web
+  namespace: nano-banana
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nano-banana-web
+  template:
+    metadata:
+      labels:
+        app: nano-banana-web
+    spec:
+      containers:
+        - name: web
+          image: cr.yandex/<registry>/nano-banana-web:latest
+          ports:
+            - containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nano-banana-web
+  namespace: nano-banana
+spec:
+  selector:
+    app: nano-banana-web
+  ports:
+    - port: 80
+      targetPort: 80

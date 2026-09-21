@@ -18,7 +18,6 @@ ENV/
 *.log
 logs/
 nano_banana.log
-# Но не игнорируем структуру папок
 !logs/.gitkeep
 !logs/errors/.gitkeep
 
@@ -44,4 +43,11 @@ Thumbs.db
 # Docker volumes
 postgres_data/
 minio_data/
+
+# Node
+node_modules/
+apps/web/dist/
+apps/web/.vite/
+.pytest_cache/
+pytest-cache-files*/
 

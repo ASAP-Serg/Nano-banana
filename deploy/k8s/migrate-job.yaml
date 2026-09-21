@@ -1,0 +1,23 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nano-banana-migrate
+  namespace: nano-banana
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: cr.yandex/<registry>/nano-banana-backend:latest
+          args: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: nano-banana-config
+            - secretRef:
+                name: nano-banana-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+          workingDir: /app

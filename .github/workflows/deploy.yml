@@ -1,56 +1,89 @@
-name: Deploy to Server
+name: CI and deploy
 
 on:
   push:
-    branches:
-      - master
-      - main
+    branches: [master, main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
-
+    env:
+      SECRET_KEY: ci-secret-key-min-32-characters-long
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Python tests
+        run: |
+          pip install -r requirements.txt
+          python -m pytest tests -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Web build
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run build
+      - name: Docker images
+        run: |
+          docker build -f deploy/docker/Dockerfile.backend -t nano-banana-backend:${{ github.sha }} .
+          docker build -f deploy/docker/Dockerfile.web -t nano-banana-web:${{ github.sha }} .
 
-      - name: Deploy to server
+  deploy:
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Beget
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          command_timeout: 30m
+          command_timeout: 45m
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
             echo "Deploy path: $(pwd)"
 
             git fetch origin master
-            git reset --hard origin/master
+            git reset --hard "${{ github.sha }}"
 
-            # НЕ делаем docker-compose down — убивает сайт, postgres может зависнуть на stop
             if docker compose version >/dev/null 2>&1; then
               DC="docker compose"
             else
               DC="docker-compose"
             fi
 
+            docker rm -f nano_banana_migrate 2>/dev/null || true
             $DC up -d --build --remove-orphans
-            sleep 15
+            sleep 20
             $DC ps
 
-            if ! docker ps --format '{{.Names}}' | grep -q '^nano_banana_api$'; then
-              echo "ERROR: nano_banana_api is not running"
-              docker logs nano_banana_api --tail 50 2>/dev/null || true
+            missing=0
+            for name in nano_banana_api nano_banana_worker nano_banana_web nano_banana_redis; do
+              if ! docker ps --format '{{.Names}}' | grep -qx "$name"; then
+                echo "ERROR: $name is not running"
+                docker logs "$name" --tail 80 2>/dev/null || true
+                missing=1
+              fi
+            done
+            if [ "$missing" -ne 0 ]; then
               exit 1
             fi
 
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/ || echo 000)
-            echo "API health: HTTP $code"
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/healthz || echo 000)
+            echo "Healthz: HTTP $code"
             if [ "$code" != "200" ]; then
-              docker logs nano_banana_api --tail 50
+              docker logs nano_banana_api --tail 80
+              docker logs nano_banana_web --tail 40
               exit 1
             fi
 

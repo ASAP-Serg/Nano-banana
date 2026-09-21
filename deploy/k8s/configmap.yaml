@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nano-banana-config
+  namespace: nano-banana
+data:
+  POSTGRES_HOST: "postgres.example.internal"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "nano_banana"
+  POSTGRES_USER: "nano_banana_user"
+  REDIS_URL: "redis://redis.example.internal:6379/0"
+  MINIO_ENDPOINT: "storage.yandexcloud.net"
+  MINIO_BUCKET: "nano-banana-images"
+  MINIO_SECURE: "true"
+  MINIO_PUBLIC_URL: "https://storage.example.com"
+  # App does not set Principal:* ; expose reads via CDN or Object Storage policy.
+  S3_PUBLIC_READ: "false"
+  API_URL: "https://banana.example.com"
+  CORS_ORIGINS: "https://banana.example.com"
+  BANANALAB_BASE_URL: "https://api.moonez.ai/api"
+  BANANALAB_API_BASE_URL: "https://api.moonez.ai/api"
+  OPENROUTER_X_TITLE: "Nano Banana"
+  MAX_WORKERS: "1"
+  MAX_CONCURRENT_GENERATIONS: "1"
+  SECURITY_DISABLE_OPENAPI: "true"
+  SECURITY_ENABLE_HSTS: "true"

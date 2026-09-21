@@ -1,9 +1,9 @@
 """Локальные проверки без реальных вызовов API."""
 import unittest
 
-from app.services.generation_prompt import enhance_prompt_for_image_generation
-from app.services.image_api_provider import infer_image_api_provider
-from app.services.bananalab_response import detail_from_response_body, find_image_in_json, humanize_api_error, is_content_policy_error, is_openrouter_security_policy, is_policy_block_error
+from nano_banana.providers.prompt import enhance_prompt_for_image_generation
+from nano_banana.providers.detect import infer_image_api_provider
+from nano_banana.providers.errors import detail_from_response_body, find_image_in_json, humanize_api_error, is_content_policy_error, is_openrouter_security_policy, is_policy_block_error
 
 
 class TestProvider(unittest.TestCase):
@@ -24,7 +24,7 @@ class TestProvider(unittest.TestCase):
 
 class TestImageModels(unittest.TestCase):
     def test_gpt_model_requires_openrouter(self):
-        from app.services.image_models import get_provider_for_model, select_api_key_for_model
+        from nano_banana.providers.models import get_provider_for_model, select_api_key_for_model
 
         keys = {"replicate": "r8_x", "bananalab": "nb_x", "openrouter": ""}
         self.assertIsNone(get_provider_for_model("gpt-5-image", keys))
@@ -37,7 +37,7 @@ class TestImageModels(unittest.TestCase):
         )
 
     def test_nano_models_use_single_provider(self):
-        from app.services.image_models import get_provider_for_model
+        from nano_banana.providers.models import get_provider_for_model
 
         keys = {"replicate": "r8_x", "bananalab": "nb_x", "openrouter": "sk-or_x"}
         self.assertEqual(get_provider_for_model("nano-banana-pro", keys), "bananalab")
@@ -48,7 +48,7 @@ class TestImageModels(unittest.TestCase):
 
 class TestPromptSanitize(unittest.TestCase):
     def test_batman_ru(self):
-        from app.services.prompt_sanitize import sanitize_prompt
+        from nano_banana.providers.sanitize import sanitize_prompt
 
         result = sanitize_prompt("Фото бетмена")
         self.assertTrue(result["changed"])
@@ -56,7 +56,7 @@ class TestPromptSanitize(unittest.TestCase):
         self.assertIn("плащ", result["prompt"].lower())
 
     def test_messi_ronaldo_ru(self):
-        from app.services.prompt_sanitize import sanitize_prompt
+        from nano_banana.providers.sanitize import sanitize_prompt
 
         result = sanitize_prompt("Леонель Месси пинает под зад Роналду")
         self.assertTrue(result["changed"])
@@ -65,7 +65,7 @@ class TestPromptSanitize(unittest.TestCase):
         self.assertNotIn("под зад", result["prompt"].lower())
 
     def test_plain_prompt_unchanged(self):
-        from app.services.prompt_sanitize import sanitize_prompt
+        from nano_banana.providers.sanitize import sanitize_prompt
 
         text = "закат над морем, масло"
         result = sanitize_prompt(text)
@@ -85,7 +85,7 @@ class TestPrompt(unittest.TestCase):
 
 class TestSecurityHelpers(unittest.TestCase):
     def test_generate_storage_object_name(self):
-        from app.security_helpers import generate_storage_object_name
+        from nano_banana.security import generate_storage_object_name
 
         name = generate_storage_object_name("results", "jpg")
         self.assertTrue(name.startswith("images/results/"))
@@ -93,8 +93,8 @@ class TestSecurityHelpers(unittest.TestCase):
         self.assertEqual(len(name.split("/")[-1].split(".")[0]), 32)
 
     def test_allowed_reference_url(self):
-        from app.config import Settings
-        from app.security_helpers import is_allowed_reference_url
+        from nano_banana.config import Settings
+        from nano_banana.security import is_allowed_reference_url
 
         s = Settings(
             SECRET_KEY="x" * 64,
@@ -110,8 +110,8 @@ class TestSecurityHelpers(unittest.TestCase):
         self.assertFalse(is_allowed_reference_url(bad, s))
 
     def test_localhost_reference_alias(self):
-        from app.config import Settings
-        from app.security_helpers import is_allowed_reference_url
+        from nano_banana.config import Settings
+        from nano_banana.security import is_allowed_reference_url
 
         s = Settings(
             SECRET_KEY="x" * 64,
@@ -125,7 +125,7 @@ class TestSecurityHelpers(unittest.TestCase):
 class TestResultStorage(unittest.TestCase):
     def test_persist_prefers_image_data(self):
         from unittest.mock import MagicMock
-        from app.services.result_storage import persist_generation_result
+        from nano_banana.storage.results import persist_generation_result
 
         minio = MagicMock()
         minio.upload_image.return_value = {
@@ -139,7 +139,7 @@ class TestResultStorage(unittest.TestCase):
 
 class TestBanalabJobUrl(unittest.TestCase):
     def test_absolute_status_url_from_path(self):
-        from app.services.bananalab_response import absolute_job_status_url
+        from nano_banana.providers.errors import absolute_job_status_url
 
         u = absolute_job_status_url(
             "https://api.bananalab.pw",
@@ -148,7 +148,7 @@ class TestBanalabJobUrl(unittest.TestCase):
         self.assertEqual(u, "https://api.bananalab.pw/v1/jobs/923f3213-cda5-4e13-8e47-2ea73383aefb")
 
     def test_bananahub_status_url_with_api_prefix(self):
-        from app.services.bananalab_response import absolute_job_status_url
+        from nano_banana.providers.errors import absolute_job_status_url
 
         u = absolute_job_status_url(
             "https://api.moonez.ai/api",
@@ -163,7 +163,7 @@ class TestBanalabJobUrl(unittest.TestCase):
         )
 
     def test_bananahub_legacy_io_host_still_supported(self):
-        from app.services.bananalab_response import absolute_job_status_url
+        from nano_banana.providers.errors import absolute_job_status_url
 
         u = absolute_job_status_url(
             "https://bananahub.app/api",
@@ -179,7 +179,7 @@ class TestBanalabJobUrl(unittest.TestCase):
         )
 
     def test_absolute_status_url_from_job_id(self):
-        from app.services.bananalab_response import absolute_job_status_url
+        from nano_banana.providers.errors import absolute_job_status_url
 
         u = absolute_job_status_url("https://api.example.com", {"job_id": "abc-123", "status": "queued"})
         self.assertEqual(u, "https://api.example.com/v1/jobs/abc-123")
@@ -263,14 +263,14 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertIn("на паузе", msg.lower())
 
     def test_is_bananalab_paused_message(self):
-        from app.services.bananalab_response import is_bananalab_paused_message
+        from nano_banana.providers.errors import is_bananalab_paused_message
 
         self.assertTrue(is_bananalab_paused_message("Project is paused."))
         self.assertTrue(is_bananalab_paused_message("Проект Banana Lab на паузе."))
         self.assertFalse(is_bananalab_paused_message("rate limit exceeded"))
 
     def test_is_bananalab_unavailable_message(self):
-        from app.services.bananalab_response import (
+        from nano_banana.providers.errors import (
             BANANALAB_PROVIDER_UNAVAILABLE_MESSAGE,
             is_bananalab_unavailable_message,
         )
@@ -294,7 +294,7 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertEqual(msg, BANANALAB_PROVIDER_UNAVAILABLE_MESSAGE)
 
     def test_is_bananalab_upstream_no_image_message(self):
-        from app.services.bananalab_response import (
+        from nano_banana.providers.errors import (
             is_bananalab_upstream_no_image_message,
             humanize_api_error,
         )
@@ -309,7 +309,7 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertIn("повторяем автоматически", msg.lower())
 
     def test_is_bananalab_empty_done_message(self):
-        from app.services.bananalab_response import is_bananalab_empty_done_message
+        from nano_banana.providers.errors import is_bananalab_empty_done_message
 
         self.assertTrue(
             is_bananalab_empty_done_message(
@@ -319,7 +319,7 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertFalse(is_bananalab_empty_done_message("Upstream returned no image"))
 
     def test_upstream_no_image_retry_delay(self):
-        from app.services.bananalab_response import upstream_no_image_retry_delay_seconds
+        from nano_banana.providers.errors import upstream_no_image_retry_delay_seconds
 
         self.assertEqual(upstream_no_image_retry_delay_seconds(0, 3), 3.0)
         self.assertEqual(upstream_no_image_retry_delay_seconds(1, 3), 5.0)
@@ -336,7 +336,7 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertTrue(msg.endswith("…"))
 
     def test_is_bananalab_upstream_internal_error_message(self):
-        from app.services.bananalab_response import is_bananalab_upstream_internal_error_message
+        from nano_banana.providers.errors import is_bananalab_upstream_internal_error_message
 
         self.assertTrue(
             is_bananalab_upstream_internal_error_message(
@@ -346,7 +346,7 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertFalse(is_bananalab_upstream_internal_error_message("Project is paused."))
 
     def test_user_generation_status_upstream_streak(self):
-        from app.services.user_generation_status import build_user_generation_status
+        from nano_banana.status.user import build_user_generation_status
 
         status = build_user_generation_status(
             [
@@ -360,7 +360,7 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertIn("Google upstream", status["message"])
 
     def test_user_generation_status_last_success_ok(self):
-        from app.services.user_generation_status import build_user_generation_status
+        from nano_banana.status.user import build_user_generation_status
 
         status = build_user_generation_status(
             [
@@ -371,7 +371,7 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertEqual(status["state"], "ok")
 
     def test_google_gemini_status_filters_active_incident(self):
-        from app.services import google_cloud_status as gcs
+        from nano_banana.status import google as gcs
 
         sample = [
             {
