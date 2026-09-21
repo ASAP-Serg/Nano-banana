@@ -1,47 +1,15 @@
-name: CI and deploy
+name: Deploy Beget
 
 on:
   push:
     branches: [master, main]
-  pull_request:
   workflow_dispatch:
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    env:
-      SECRET_KEY: ci-secret-key-min-32-characters-long
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-      - name: Python tests
-        run: |
-          pip install -r requirements.txt
-          python -m pytest tests -q
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
-      - name: Web build
-        working-directory: apps/web
-        run: |
-          npm ci
-          npm run build
-      - name: Docker images
-        run: |
-          docker build -f deploy/docker/Dockerfile.backend -t nano-banana-backend:${{ github.sha }} .
-          docker build -f deploy/docker/Dockerfile.web -t nano-banana-web:${{ github.sha }} .
+# Only the personal VPS repo. The company copy must not SSH anywhere.
+if: github.repository == 'ASAP-Serg/Nano-banana'
 
+jobs:
   deploy:
-    if: >
-      github.repository == 'ASAP-Serg/Nano-banana' &&
-      github.event_name != 'pull_request' &&
-      (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
-    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Beget
