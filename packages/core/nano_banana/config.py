@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET: str = "nano-banana-images"
     MINIO_PUBLIC_URL: str = "http://localhost:9000"
-    MINIO_PRESIGN_EXPIRES_SECONDS: int = 604800
+    MINIO_PRESIGN_EXPIRES_SECONDS: int = 3600
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432

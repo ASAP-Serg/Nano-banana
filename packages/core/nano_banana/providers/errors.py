@@ -21,18 +21,40 @@ def _join_base_and_path(base_url: str, path: str) -> str:
 def absolute_job_status_url(base_url: str, data: Dict[str, Any]) -> Optional[str]:
     """
     POST /v1/generations отдаёт job_id и/или относительный status_url.
-    Возвращает полный URL для GET опроса статуса.
+    Возвращает полный URL для GET опроса статуса (только allowlist хостов Moonez).
     """
+    from urllib.parse import urlparse
+
     base = (base_url or "").rstrip("/")
+    allowed_hosts = {
+        "api.moonez.ai",
+        "moonez.ai",
+        "cdn.moonez.ai",
+    }
+    base_host = urlparse(base if "://" in base else f"https://{base}").hostname
+    if base_host:
+        allowed_hosts.add(base_host.lower())
+
+    def _host_ok(url: str) -> bool:
+        host = (urlparse(url).hostname or "").lower()
+        return bool(host) and (
+            host in allowed_hosts or any(host.endswith("." + h) for h in allowed_hosts)
+        )
+
     su = data.get("status_url")
     if isinstance(su, str) and su.strip():
         su = su.strip()
         if su.startswith("http://") or su.startswith("https://"):
-            return _normalize_bananalab_job_url(su, base)
-        return _normalize_bananalab_job_url(_join_base_and_path(base, su), base)
+            url = _normalize_bananalab_job_url(su, base)
+        else:
+            url = _normalize_bananalab_job_url(_join_base_and_path(base, su), base)
+        if not _host_ok(url):
+            return None
+        return url
     jid = data.get("job_id")
     if jid:
-        return f"{base}/v1/jobs/{jid}"
+        url = f"{base}/v1/jobs/{jid}"
+        return url if _host_ok(url) else None
     return None
 
 

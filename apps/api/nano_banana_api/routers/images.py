@@ -236,7 +236,11 @@ async def get_service_status(
     user: Annotated[Optional[TokenPayload], Depends(auth_service.get_optional_user)] = None,
 ):
     user_id = user.user_id if user else None
-    return build_public_service_status(user_id=user_id)
+    # Анонимам — только грубый баннер без queue/runtime internals
+    return build_public_service_status(
+        user_id=user_id,
+        include_internals=bool(user_id),
+    )
 
 
 @router.get("/provider-status")

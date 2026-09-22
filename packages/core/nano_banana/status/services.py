@@ -80,7 +80,11 @@ def _merge_user(payload: Dict[str, Any], user_status: Dict[str, Any]) -> None:
         )
 
 
-def build_public_service_status(user_id: Optional[int] = None) -> Dict[str, Any]:
+def build_public_service_status(
+    user_id: Optional[int] = None,
+    *,
+    include_internals: bool = False,
+) -> Dict[str, Any]:
     google_status = get_google_gemini_status()
     reachable, probe_error = runtime.health_status()
     is_unavailable = not reachable or runtime.is_unavailable()
@@ -89,24 +93,35 @@ def build_public_service_status(user_id: Optional[int] = None) -> Dict[str, Any]
     google_incident = bool(google_status.get("has_active_incident"))
     active_google = (google_status.get("active_incidents") or [{}])[0] if google_incident else None
     snap = runtime.snapshot()
-    queue_size = get_job_queue().queue_size()
+    queue_size = get_job_queue().queue_size() if include_internals else 0
 
     if is_unavailable:
         hub_state = "unavailable"
-        hub_message = probe_error or snap.get("last_unavailable_error") or (
-            "Moonez API недоступен: сервер провайдера не отвечает. "
-            "Проверьте панель https://moonez.ai и IP whitelist."
+        hub_message = (
+            "Moonez API временно недоступен. Попробуйте позже."
+            if not include_internals
+            else (
+                probe_error or snap.get("last_unavailable_error") or (
+                    "Moonez API недоступен: сервер провайдера не отвечает. "
+                    "Проверьте панель https://moonez.ai и IP whitelist."
+                )
+            )
         )
-        hub_message += runtime.format_duration_hint(
-            runtime.duration_seconds("provider_unavailable_since", "last_unavailable_at"),
-            "Недоступен уже",
-        )
+        if include_internals:
+            hub_message += runtime.format_duration_hint(
+                runtime.duration_seconds("provider_unavailable_since", "last_unavailable_at"),
+                "Недоступен уже",
+            )
     elif is_paused:
         hub_state = "paused"
         hub_message = (
-            f"Moonez: проект на паузе у провайдера."
-            f"{runtime.format_duration_hint(runtime.duration_seconds('project_paused_since', 'last_paused_at'), 'На паузе уже')} "
-            f"Задач в очереди: {queue_size}."
+            "Moonez: генерация временно на паузе у провайдера."
+            if not include_internals
+            else (
+                f"Moonez: проект на паузе у провайдера."
+                f"{runtime.format_duration_hint(runtime.duration_seconds('project_paused_since', 'last_paused_at'), 'На паузе уже')} "
+                f"Задач в очереди: {queue_size}."
+            )
         )
     else:
         hub_state = "ok"
@@ -118,18 +133,20 @@ def build_public_service_status(user_id: Optional[int] = None) -> Dict[str, Any]
         gemini_source = "google_official"
     elif is_runtime_degraded:
         gemini_state = "degraded"
-        gemini_message = (
-            "Google upstream возвращает internal error — генерации могут не пройти."
-            + runtime.format_duration_hint(runtime.duration_seconds("upstream_degraded_since"), "Нестабильно уже")
-        )
+        gemini_message = "Google upstream нестабилен — генерации могут не пройти."
+        if include_internals:
+            gemini_message = (
+                "Google upstream возвращает internal error — генерации могут не пройти."
+                + runtime.format_duration_hint(runtime.duration_seconds("upstream_degraded_since"), "Нестабильно уже")
+            )
         gemini_source = "runtime_probe"
     elif google_status.get("fetch_ok"):
         gemini_state = "ok"
-        gemini_message = "Официальных инцидентов Google Gemini нет. Наблюдение на сервере — норма."
+        gemini_message = "Официальных инцидентов Google Gemini нет."
         gemini_source = "google_official"
     else:
         gemini_state = "unknown"
-        gemini_message = "Не удалось проверить status.cloud.google.com — смотрим только наш мониторинг."
+        gemini_message = "Статус Google не проверен — смотрим только наш мониторинг."
         gemini_source = "runtime_probe"
 
     if is_unavailable or is_paused:
@@ -170,24 +187,29 @@ def build_public_service_status(user_id: Optional[int] = None) -> Dict[str, Any]
                 "message": gemini_message,
                 "source": gemini_source,
                 "status_page_url": google_status.get("status_page_url"),
-                "active_incidents": google_status.get("active_incidents") or [],
             },
         ],
         "google_status": {
-            "checked_at": google_status.get("checked_at"),
-            "fetch_ok": google_status.get("fetch_ok"),
-            "fetch_error": google_status.get("fetch_error"),
             "has_active_incident": google_incident,
             "status_page_url": google_status.get("status_page_url"),
         },
-        "runtime": {
+    }
+    if include_internals:
+        payload["services"][1]["active_incidents"] = google_status.get("active_incidents") or []
+        payload["google_status"].update(
+            {
+                "checked_at": google_status.get("checked_at"),
+                "fetch_ok": google_status.get("fetch_ok"),
+                "fetch_error": google_status.get("fetch_error"),
+            }
+        )
+        payload["runtime"] = {
             "last_success_at": snap.get("last_success_at") or None,
             "last_upstream_error_at": snap.get("last_upstream_error_at") or None,
             "upstream_error_count": int(snap.get("upstream_error_count") or 0),
             "upstream_degraded": is_runtime_degraded,
             "queue_size": queue_size,
-        },
-    }
+        }
     if user_id is not None:
         _merge_user(payload, _load_user_generation_status(user_id))
     return payload

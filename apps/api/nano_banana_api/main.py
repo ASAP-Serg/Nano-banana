@@ -39,6 +39,9 @@ app = FastAPI(
 CORS_ORIGINS = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()] or ["*"]
 allow_credentials = "*" not in CORS_ORIGINS
 if "*" in CORS_ORIGINS:
+    api_lower = (settings.API_URL or "").lower()
+    if api_lower.startswith("https://") and "localhost" not in api_lower:
+        raise RuntimeError("CORS_ORIGINS=* запрещён в production — укажите явные домены")
     logger.warning("[SECURITY] CORS_ORIGINS содержит '*'. Для продакшена укажите конкретные домены.")
 app.add_middleware(
     CORSMiddleware,
@@ -58,6 +61,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         api_lower = (settings.API_URL or "").lower()
         if settings.SECURITY_ENABLE_HSTS and api_lower.startswith("https://") and "localhost" not in api_lower:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # CSP на API-ответах (дубль к web nginx; не мешает JSON)
+        if settings.SECURITY_STRICT_CSP:
+            response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
         return response
 
 
@@ -84,7 +90,11 @@ async def healthz():
 
 
 @app.get("/readyz")
-async def readyz():
+async def readyz(request: Request):
+    # Не светим checks наружу: только loopback / docker-internal.
+    client = request.client.host if request.client else ""
+    if client not in ("127.0.0.1", "::1") and not client.startswith("172.") and not client.startswith("10."):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     checks = {"postgres": False, "redis": False, "s3": False}
     try:
         checks["postgres"] = db_service.ping()
@@ -107,7 +117,7 @@ async def readyz():
 
 @app.get("/api")
 async def api_info():
-    return {"message": "Nano Banana API", "version": "2.0.0", "docs": "/docs"}
+    return {"message": "Nano Banana API", "version": "2.0.0"}
 
 
 app.include_router(api_router, prefix="/api/v1")
