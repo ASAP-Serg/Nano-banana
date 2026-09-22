@@ -43,7 +43,7 @@ services:
       retries: 10
 
   minio-setup:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: minio/mc:latest
     depends_on:
       minio:
         condition: service_healthy
