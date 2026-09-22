@@ -1,49 +1,42 @@
 """Роутер аутентификации."""
 from datetime import datetime
-import threading
-import time
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy import or_
 
 from nano_banana.auth import auth_service
 from nano_banana.config import settings
 from nano_banana.db.models import User
 from nano_banana.db.session import db_service
+from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import UserCreateRequest, UserLoginRequest, UserResponse
 from nano_banana.tokens import Token, TokenPayload
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-_login_attempts = {}
-_login_lock = threading.Lock()
+
+COOKIE_NAME = "nb_access"
 
 
-def _rate_limit_auth(scope: str, identifier: str, max_attempts: int, window_seconds: int, detail: str):
-    now = time.time()
-    key = f"{scope}:{identifier}"
-    with _login_lock:
-        attempts = _login_attempts.get(key, [])
-        attempts = [ts for ts in attempts if now - ts <= window_seconds]
-        if len(attempts) >= max_attempts:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=detail)
-        attempts.append(now)
-        _login_attempts[key] = attempts
+def _cookie_secure() -> bool:
+    return (settings.API_URL or "").lower().startswith("https://")
 
 
-def _client_ip(request: Request) -> str:
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip().lower()
-    client_host = request.client.host if request.client else None
-    if client_host and client_host not in ("127.0.0.1", "::1"):
-        return client_host.lower()
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip().lower()
-    if client_host:
-        return client_host.lower()
-    return "unknown"
+def _set_access_cookie(response: Response, token: str) -> None:
+    max_age = int(settings.ACCESS_TOKEN_EXPIRE_MINUTES) * 60
+    response.set_cookie(
+        key=COOKIE_NAME,
+        value=token,
+        max_age=max_age,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_access_cookie(response: Response) -> None:
+    response.delete_cookie(key=COOKIE_NAME, path="/", samesite="lax", secure=_cookie_secure())
 
 
 def _bootstrap_secret_ok(header_secret: Optional[str]) -> bool:
@@ -57,6 +50,7 @@ def _bootstrap_secret_ok(header_secret: Optional[str]) -> bool:
 async def register(
     user_data: UserCreateRequest,
     request: Request,
+    response: Response,
     x_admin_bootstrap_secret: Annotated[Optional[str], Header()] = None,
 ):
     with db_service.get_session() as session:
@@ -70,9 +64,9 @@ async def register(
                 detail="Регистрация отключена. Обратитесь к администратору.",
             )
 
-    _rate_limit_auth(
+    check_rate_limit(
         "register",
-        _client_ip(request),
+        client_ip_from_request(request),
         settings.SECURITY_REGISTER_MAX_ATTEMPTS,
         settings.SECURITY_REGISTER_WINDOW_SECONDS,
         "Слишком много попыток регистрации с этого адреса. Попробуйте позже.",
@@ -102,25 +96,27 @@ async def register(
         session.add(new_user)
         session.commit()
         session.refresh(new_user)
+        access = await auth_service.create_access_token(new_user)
+        _set_access_cookie(response, access)
         return Token(
-            access_token=await auth_service.create_access_token(new_user),
+            access_token=access,
             refresh_token=await auth_service.create_refresh_token(new_user),
             token_type="bearer",
         )
 
 
 @router.post("/login", response_model=Token)
-async def login(user_data: UserLoginRequest, request: Request):
-    ip = _client_ip(request)
+async def login(user_data: UserLoginRequest, request: Request, response: Response):
+    ip = client_ip_from_request(request)
     ident = user_data.username_or_email.strip().lower()
-    _rate_limit_auth(
+    check_rate_limit(
         "login-ip",
         ip,
         settings.SECURITY_LOGIN_MAX_ATTEMPTS * 3,
         settings.SECURITY_LOGIN_WINDOW_SECONDS,
         "Слишком много попыток входа с этого адреса. Попробуйте позже.",
     )
-    _rate_limit_auth(
+    check_rate_limit(
         "login-user",
         f"{ip}:{ident}",
         settings.SECURITY_LOGIN_MAX_ATTEMPTS,
@@ -143,11 +139,19 @@ async def login(user_data: UserLoginRequest, request: Request):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Аккаунт пользователя отключен")
         user.last_login = datetime.utcnow()
         session.commit()
+        access = await auth_service.create_access_token(user)
+        _set_access_cookie(response, access)
         return Token(
-            access_token=await auth_service.create_access_token(user),
+            access_token=access,
             refresh_token=await auth_service.create_refresh_token(user),
             token_type="bearer",
         )
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    _clear_access_cookie(response)
+    return {"ok": True}
 
 
 @router.get("/me", response_model=UserResponse)

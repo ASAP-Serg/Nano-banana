@@ -4,8 +4,6 @@
 
 from datetime import datetime, timedelta
 from typing import Annotated, Optional
-import threading
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_, func
@@ -15,11 +13,10 @@ from nano_banana.tokens import TokenPayload
 from nano_banana.auth import auth_service
 from nano_banana.db.session import db_service
 from nano_banana.config import settings
+from nano_banana.rate_limit import check_rate_limit
 from nano_banana.storage.s3 import MinioService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-_admin_read_attempts = {}
-_admin_read_lock = threading.Lock()
 _minio: Optional[MinioService] = None
 
 
@@ -36,21 +33,13 @@ def _require_admin(user: TokenPayload):
 
 
 def _rate_limit_admin_read(user_id: int, scope: str):
-    now = time.time()
-    window = settings.SECURITY_ADMIN_READ_WINDOW_SECONDS
-    max_requests = settings.SECURITY_ADMIN_READ_MAX_REQUESTS
-    key = f"{user_id}:{scope}"
-    with _admin_read_lock:
-        attempts = _admin_read_attempts.get(key, [])
-        attempts = [ts for ts in attempts if now - ts <= window]
-        if len(attempts) >= max_requests:
-            raise HTTPException(
-                status_code=429,
-                detail="Слишком много админ-запросов. Повторите позже.",
-            )
-        attempts.append(now)
-        _admin_read_attempts[key] = attempts
-
+    check_rate_limit(
+        f"admin-read:{scope}",
+        str(user_id),
+        settings.SECURITY_ADMIN_READ_MAX_REQUESTS,
+        settings.SECURITY_ADMIN_READ_WINDOW_SECONDS,
+        "Слишком много админ-запросов. Повторите позже.",
+    )
 
 def _audit_admin_action(session, actor_admin_id: int, action: str, target_user_id: Optional[int], details: Optional[dict] = None):
     log_row = AdminAuditLog(

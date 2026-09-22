@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     JOB_LOCK_TTL_SECONDS: int = 180
     STUCK_GENERATION_MINUTES: int = 20
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 180
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PWD_SCHEMES: str = "bcrypt"
     SECURITY_ALLOW_PUBLIC_REGISTER: bool = False
@@ -127,6 +127,9 @@ class Settings(BaseSettings):
             raise ValueError("POSTGRES_PASSWORD is weak — set a strong password in .env")
         if (self.MINIO_SECRET_KEY or "").strip().lower() in _WEAK_PASSWORDS:
             raise ValueError("MINIO_SECRET_KEY is weak — set a strong password in .env")
+        api_lower = (self.API_URL or "").lower()
+        if self.S3_PUBLIC_READ and api_lower.startswith("https://") and "localhost" not in api_lower:
+            raise ValueError("S3_PUBLIC_READ=true запрещён в production (API_URL=https)")
         return self
 
 

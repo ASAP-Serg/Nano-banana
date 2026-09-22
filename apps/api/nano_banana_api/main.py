@@ -43,12 +43,13 @@ if "*" in CORS_ORIGINS:
     if api_lower.startswith("https://") and "localhost" not in api_lower:
         raise RuntimeError("CORS_ORIGINS=* запрещён в production — укажите явные домены")
     logger.warning("[SECURITY] CORS_ORIGINS содержит '*'. Для продакшена укажите конкретные домены.")
+# Cookie auth requires explicit origins + credentials (no *)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=CORS_ORIGINS if allow_credentials else CORS_ORIGINS,
     allow_credentials=allow_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Admin-Bootstrap-Secret"],
 )
 
 

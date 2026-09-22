@@ -6,15 +6,16 @@ from typing import Optional
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, status
 from nano_banana.config import settings
-from nano_banana.db.models import User        
-from nano_banana.tokens import TokenData, TokenPayload
+from nano_banana.db.models import User
+from nano_banana.tokens import TokenPayload
 from nano_banana.db.session import db_service
 import logging
 
 logger = logging.getLogger(__name__)
 oauth2_scheme = HTTPBearer(auto_error=False)
+ACCESS_COOKIE = "nb_access"
 
 class AuthService:
     def __init__(self):
@@ -85,19 +86,18 @@ class AuthService:
             expires_delta=self.refresh_token_expire
         )
 
-    async def get_current_user(
-        self, 
-        credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme)
-    ):
-        """Получение текущего пользователя из токена"""
-        if credentials is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization token missing",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    def _token_from_request(
+        self,
+        credentials: Optional[HTTPAuthorizationCredentials],
+        cookie_token: Optional[str],
+    ) -> Optional[str]:
+        if credentials and credentials.credentials:
+            return credentials.credentials
+        if cookie_token:
+            return cookie_token.strip() or None
+        return None
 
-        token = credentials.credentials
+    async def _user_from_token(self, token: str) -> TokenPayload:
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             token_payload = TokenPayload(
@@ -145,15 +145,32 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+    async def get_current_user(
+        self,
+        credentials: HTTPAuthorizationCredentials = Depends(oauth2_scheme),
+        nb_access: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
+    ):
+        """Пользователь из Bearer или httpOnly cookie nb_access."""
+        token = self._token_from_request(credentials, nb_access)
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization token missing",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return await self._user_from_token(token)
+
     async def get_optional_user(
         self,
         credentials: Optional[HTTPAuthorizationCredentials] = Depends(oauth2_scheme),
+        nb_access: Optional[str] = Cookie(default=None, alias=ACCESS_COOKIE),
     ) -> Optional[TokenPayload]:
-        """Текущий пользователь, если передан Bearer; иначе None (без 401)."""
-        if credentials is None:
+        """Текущий пользователь, если есть Bearer/cookie; иначе None (без 401)."""
+        token = self._token_from_request(credentials, nb_access)
+        if not token:
             return None
         try:
-            return await self.get_current_user(credentials)
+            return await self._user_from_token(token)
         except Exception as exc:
             logger.debug("[AUTH] optional user ignored: %s", exc)
             return None

@@ -1,18 +1,21 @@
 const API = "/api/v1";
 
-export function getToken() {
-  return localStorage.getItem("nb_token") || "";
-}
-
-export function setToken(token) {
-  if (token) localStorage.setItem("nb_token", token);
-  else localStorage.removeItem("nb_token");
+/** Legacy: clear XSS-stealable tokens from older builds. */
+export function clearLegacyToken() {
+  try {
+    localStorage.removeItem("nb_token");
+    localStorage.removeItem("nb_refresh");
+  } catch {
+    /* ignore */
+  }
 }
 
 async function request(path, { method = "GET", body, auth = true, headers = {} } = {}) {
-  const opts = { method, headers: { ...headers } };
-  const token = getToken();
-  if (auth && token) opts.headers.Authorization = `Bearer ${token}`;
+  const opts = {
+    method,
+    headers: { ...headers },
+    credentials: "include",
+  };
   if (body !== undefined) {
     opts.headers["Content-Type"] = "application/json";
     opts.body = JSON.stringify(body);
@@ -27,7 +30,12 @@ async function request(path, { method = "GET", body, auth = true, headers = {} }
   }
   if (!res.ok) {
     const detail = data?.detail;
-    const message = typeof detail === "string" ? detail : Array.isArray(detail) ? JSON.stringify(detail) : res.statusText;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? JSON.stringify(detail)
+          : res.statusText;
     const err = new Error(message || "Ошибка запроса");
     err.status = res.status;
     err.payload = data;
@@ -41,6 +49,7 @@ export const api = {
     request("/auth/login", { method: "POST", body: { username_or_email, password }, auth: false }),
   register: (username, email, password) =>
     request("/auth/register", { method: "POST", body: { username, email, password }, auth: false }),
+  logout: () => request("/auth/logout", { method: "POST", auth: false }),
   me: () => request("/auth/me"),
   models: () => request("/images/models"),
   generate: (payload) => request("/images/generate", { method: "POST", body: payload }),

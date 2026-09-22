@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, getToken, setToken } from "./api.js";
+import { api, clearLegacyToken } from "./api.js";
 import { toast } from "./toast.js";
 import Navbar from "./components/Navbar.jsx";
 import StatusBar from "./components/StatusBar.jsx";
@@ -14,6 +14,7 @@ import ParamsModal from "./components/ParamsModal.jsx";
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("nb_theme") || "dark");
   const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
@@ -30,26 +31,27 @@ export default function App() {
   const generateRef = useRef(null);
 
   useEffect(() => {
+    clearLegacyToken();
+  }, []);
+
+  useEffect(() => {
     document.documentElement.setAttribute("data-bs-theme", theme);
     localStorage.setItem("nb_theme", theme);
   }, [theme]);
 
   const loadMe = useCallback(async () => {
-    if (!getToken()) {
-      setUser(null);
-      return;
-    }
     try {
       setUser(await api.me());
     } catch {
-      setToken("");
       setUser(null);
+    } finally {
+      setAuthChecked(true);
     }
   }, []);
 
   const loadStatus = useCallback(async () => {
     try {
-      setStatus(await api.serviceStatus(Boolean(getToken())));
+      setStatus(await api.serviceStatus(true));
     } catch (err) {
       setStatus({
         state: "unknown",
@@ -60,7 +62,7 @@ export default function App() {
   }, []);
 
   const loadGallery = useCallback(async () => {
-    if (!getToken()) {
+    if (!user) {
       setGallery([]);
       return;
     }
@@ -71,10 +73,10 @@ export default function App() {
     } catch (err) {
       toast(err.message, "error");
     }
-  }, []);
+  }, [user]);
 
   const loadModels = useCallback(async () => {
-    if (!getToken()) return;
+    if (!user) return;
     try {
       const data = await api.models();
       setModels(data.models || {});
@@ -83,14 +85,18 @@ export default function App() {
     } catch (err) {
       toast(err.message, "error");
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     loadMe();
+  }, [loadMe]);
+
+  useEffect(() => {
+    if (!authChecked) return;
     loadStatus();
     const t = setInterval(loadStatus, 30000);
     return () => clearInterval(t);
-  }, [loadMe, loadStatus]);
+  }, [authChecked, loadStatus]);
 
   useEffect(() => {
     if (!user) return;
@@ -104,8 +110,8 @@ export default function App() {
     e.preventDefault();
     const form = new FormData(e.target);
     try {
-      const tokens = await api.login(form.get("username"), form.get("password"));
-      setToken(tokens.access_token);
+      await api.login(form.get("username"), form.get("password"));
+      clearLegacyToken();
       setShowLogin(false);
       await loadMe();
       toast("Вход выполнен");
@@ -118,14 +124,26 @@ export default function App() {
     e.preventDefault();
     const form = new FormData(e.target);
     try {
-      const tokens = await api.register(form.get("username"), form.get("email"), form.get("password"));
-      setToken(tokens.access_token);
+      await api.register(form.get("username"), form.get("email"), form.get("password"));
+      clearLegacyToken();
       setShowRegister(false);
       await loadMe();
       toast("Регистрация успешна");
     } catch (err) {
       toast(err.message, "error");
     }
+  }
+
+  async function onLogout() {
+    try {
+      await api.logout();
+    } catch {
+      /* ignore */
+    }
+    clearLegacyToken();
+    setUser(null);
+    setGallery([]);
+    setShowAdmin(false);
   }
 
   async function onGenerate(payload) {
@@ -198,12 +216,7 @@ export default function App() {
         onLogin={() => setShowLogin(true)}
         onKeys={() => setShowKeys(true)}
         onAdmin={() => setShowAdmin(true)}
-        onLogout={() => {
-          setToken("");
-          setUser(null);
-          setGallery([]);
-          setShowAdmin(false);
-        }}
+        onLogout={onLogout}
       />
       <StatusBar status={status} />
       <main className="container-fluid my-4">
