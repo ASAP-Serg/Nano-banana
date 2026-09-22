@@ -64,7 +64,7 @@ services:
     restart: unless-stopped
 
   minio-setup:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: minio/mc:latest
     container_name: nano_banana_minio_setup
     depends_on:
       minio:
