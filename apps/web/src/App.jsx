@@ -93,10 +93,14 @@ export default function App() {
 
   useEffect(() => {
     if (!authChecked) return;
+    if (!user) {
+      setStatus(null);
+      return;
+    }
     loadStatus();
     const t = setInterval(loadStatus, 30000);
     return () => clearInterval(t);
-  }, [authChecked, loadStatus]);
+  }, [authChecked, user, loadStatus]);
 
   useEffect(() => {
     if (!user) return;

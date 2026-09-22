@@ -68,7 +68,48 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class CookieCsrfMiddleware(BaseHTTPMiddleware):
+    """Block cross-site state changes that rely on nb_access cookie (no Bearer)."""
+
+    _SAFE = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method.upper() in self._SAFE:
+            return await call_next(request)
+        # Bearer clients are not cookie-CSRF; skip when Authorization present.
+        if request.headers.get("authorization"):
+            return await call_next(request)
+        if not request.cookies.get("nb_access"):
+            return await call_next(request)
+        allowed = {o.strip().rstrip("/") for o in CORS_ORIGINS if o.strip() and o.strip() != "*"}
+        api_url = (settings.API_URL or "").strip().rstrip("/")
+        if api_url:
+            allowed.add(api_url)
+        origin = (request.headers.get("origin") or "").strip().rstrip("/")
+        referer = (request.headers.get("referer") or "").strip()
+        referer_origin = ""
+        if referer:
+            try:
+                from urllib.parse import urlparse
+
+                p = urlparse(referer)
+                if p.scheme and p.netloc:
+                    referer_origin = f"{p.scheme}://{p.netloc}".rstrip("/")
+            except Exception:
+                referer_origin = ""
+        candidate = origin or referer_origin
+        if allowed and candidate and candidate not in allowed:
+            return JSONResponse(status_code=403, content={"detail": "CSRF origin rejected"})
+        if allowed and not candidate:
+            # Cookie session without Origin/Referer on mutating call — reject in prod HTTPS.
+            api_lower = (settings.API_URL or "").lower()
+            if api_lower.startswith("https://") and "localhost" not in api_lower:
+                return JSONResponse(status_code=403, content={"detail": "CSRF origin required"})
+        return await call_next(request)
+
+
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CookieCsrfMiddleware)
 
 
 @app.exception_handler(RequestValidationError)

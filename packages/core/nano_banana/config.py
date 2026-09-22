@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET: str = "nano-banana-images"
     MINIO_PUBLIC_URL: str = "http://localhost:9000"
-    MINIO_PRESIGN_EXPIRES_SECONDS: int = 3600
+    MINIO_PRESIGN_EXPIRES_SECONDS: int = 900
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -130,6 +130,12 @@ class Settings(BaseSettings):
         api_lower = (self.API_URL or "").lower()
         if self.S3_PUBLIC_READ and api_lower.startswith("https://") and "localhost" not in api_lower:
             raise ValueError("S3_PUBLIC_READ=true запрещён в production (API_URL=https)")
+        if api_lower.startswith("https://") and "localhost" not in api_lower:
+            dek = (self.DATA_ENCRYPTION_KEY or "").strip()
+            if len(dek) < 32 or dek == (self.SECRET_KEY or "").strip():
+                raise ValueError(
+                    "DATA_ENCRYPTION_KEY must be set in production (>=32 chars, distinct from SECRET_KEY)"
+                )
         return self
 
 

@@ -16,6 +16,7 @@ from nano_banana.tokens import Token, TokenPayload
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 COOKIE_NAME = "nb_access"
+COOKIE_PATH = "/api"
 
 
 def _cookie_secure() -> bool:
@@ -31,12 +32,14 @@ def _set_access_cookie(response: Response, token: str) -> None:
         httponly=True,
         secure=_cookie_secure(),
         samesite="lax",
-        path="/",
+        path=COOKIE_PATH,
     )
 
 
 def _clear_access_cookie(response: Response) -> None:
-    response.delete_cookie(key=COOKIE_NAME, path="/", samesite="lax", secure=_cookie_secure())
+    # Clear both paths: legacy "/" and scoped "/api"
+    for path in (COOKIE_PATH, "/"):
+        response.delete_cookie(key=COOKIE_NAME, path=path, samesite="lax", secure=_cookie_secure())
 
 
 def _bootstrap_secret_ok(header_secret: Optional[str]) -> bool:
@@ -98,11 +101,8 @@ async def register(
         session.refresh(new_user)
         access = await auth_service.create_access_token(new_user)
         _set_access_cookie(response, access)
-        return Token(
-            access_token=access,
-            refresh_token=await auth_service.create_refresh_token(new_user),
-            token_type="bearer",
-        )
+        # Не отдаём JWT в JSON — только httpOnly cookie (XSS не сможет вытащить токен из ответа).
+        return Token(access_token="", refresh_token="", token_type="cookie")
 
 
 @router.post("/login", response_model=Token)
@@ -141,11 +141,7 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         session.commit()
         access = await auth_service.create_access_token(user)
         _set_access_cookie(response, access)
-        return Token(
-            access_token=access,
-            refresh_token=await auth_service.create_refresh_token(user),
-            token_type="bearer",
-        )
+        return Token(access_token="", refresh_token="", token_type="cookie")
 
 
 @router.post("/logout")

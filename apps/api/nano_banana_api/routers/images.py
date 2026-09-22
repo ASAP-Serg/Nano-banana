@@ -233,13 +233,12 @@ async def get_available_models(user: Annotated[TokenPayload, Depends(auth_servic
 @router.get("/service-status")
 @router.get("/bananahub-health")
 async def get_service_status(
-    user: Annotated[Optional[TokenPayload], Depends(auth_service.get_optional_user)] = None,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
-    user_id = user.user_id if user else None
-    # Анонимам — только грубый баннер без queue/runtime internals
+    # Только для авторизованных — без публичного recon-баннера.
     return build_public_service_status(
-        user_id=user_id,
-        include_internals=bool(user_id),
+        user_id=user.user_id,
+        include_internals=False,
     )
 
 
