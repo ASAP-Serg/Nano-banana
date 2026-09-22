@@ -28,7 +28,14 @@ def _worker_id() -> str:
 
 class JobQueue:
     def __init__(self, url: Optional[str] = None):
-        self.client = redis.Redis.from_url(url or settings.REDIS_URL, decode_responses=True)
+        # socket_timeout > brpop timeout, иначе redis-py кидает TimeoutError вместо None
+        self.client = redis.Redis.from_url(
+            url or settings.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=30,
+            health_check_interval=30,
+        )
         self.worker_id = _worker_id()
 
     def ping(self) -> bool:
@@ -65,7 +72,11 @@ class JobQueue:
 
     def pop(self, timeout: int = 5) -> Optional[Dict[str, Any]]:
         self._promote_delayed()
-        item = self.client.brpop(JOBS_QUEUE, timeout=timeout)
+        try:
+            item = self.client.brpop(JOBS_QUEUE, timeout=timeout)
+        except (redis.TimeoutError, TimeoutError, redis.ConnectionError) as exc:
+            logger.debug("[QUEUE] pop wait: %s", exc)
+            return None
         if not item:
             return None
         _, raw = item

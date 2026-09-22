@@ -34,7 +34,12 @@ def main() -> None:
             except Exception as exc:
                 logger.error("[WORKER] maintenance failed: %s", exc, exc_info=True)
             last_maintenance = now
-        job = queue.pop(timeout=5)
+        try:
+            job = queue.pop(timeout=5)
+        except Exception as exc:
+            logger.error("[WORKER] queue pop failed: %s", exc, exc_info=True)
+            time.sleep(1)
+            continue
         if not job:
             continue
         generation_id = job.get("generation_id")
