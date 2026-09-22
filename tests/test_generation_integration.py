@@ -98,6 +98,9 @@ class TestSecurityHelpers(unittest.TestCase):
 
         s = Settings(
             SECRET_KEY="x" * 64,
+            POSTGRES_PASSWORD="test-strong-postgres-password",
+            MINIO_ACCESS_KEY="testminioaccess12",
+            MINIO_SECRET_KEY="test-strong-minio-secret-key",
             MINIO_PUBLIC_URL="https://storage.example.com",
             MINIO_BUCKET="nano-banana-images",
             API_URL="https://app.example.com",
@@ -115,11 +118,34 @@ class TestSecurityHelpers(unittest.TestCase):
 
         s = Settings(
             SECRET_KEY="x" * 64,
+            POSTGRES_PASSWORD="test-strong-postgres-password",
+            MINIO_ACCESS_KEY="testminioaccess12",
+            MINIO_SECRET_KEY="test-strong-minio-secret-key",
             MINIO_PUBLIC_URL="http://localhost:9000",
             MINIO_BUCKET="nano-banana-images",
         )
         url = "http://127.0.0.1:9000/nano-banana-images/images/results/deadbeef.jpg"
         self.assertTrue(is_allowed_reference_url(url, s))
+
+    def test_ssrf_blocks_private_and_evil(self):
+        from nano_banana.config import Settings
+        from nano_banana.security import is_safe_outbound_image_url
+
+        s = Settings(
+            SECRET_KEY="x" * 64,
+            POSTGRES_PASSWORD="test-strong-postgres-password",
+            MINIO_ACCESS_KEY="testminioaccess12",
+            MINIO_SECRET_KEY="test-strong-minio-secret-key",
+            MINIO_PUBLIC_URL="https://storage.example.com",
+            MINIO_BUCKET="nano-banana-images",
+        )
+        self.assertFalse(is_safe_outbound_image_url("http://169.254.169.254/latest/meta-data/", s))
+        self.assertFalse(is_safe_outbound_image_url("https://evil.example/x.jpg", s))
+        self.assertTrue(
+            is_safe_outbound_image_url(
+                "https://storage.example.com/nano-banana-images/images/results/a.jpg", s
+            )
+        )
 
 
 class TestResultStorage(unittest.TestCase):

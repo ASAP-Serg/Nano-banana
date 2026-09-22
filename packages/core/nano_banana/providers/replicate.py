@@ -284,7 +284,10 @@ class ReplicateService:
                                 logger.debug(f"[REPLICATE] Референс {idx}: обработан base64 изображение")
                             elif img.startswith(('http://', 'https://')):
                                 # URL изображение - загружаем и оптимизируем
-                                img_response = requests.get(img, timeout=30)
+                                from nano_banana.config import settings as app_settings
+                                from nano_banana.security import assert_safe_outbound_image_url
+                                assert_safe_outbound_image_url(img, app_settings)
+                                img_response = requests.get(img, timeout=30, allow_redirects=False)
                                 if img_response.status_code == 200:
                                     img_data = img_response.content
                                     
@@ -548,7 +551,10 @@ class ReplicateService:
             if result_url and not result_data:
                 try:
                     logger.info(f"[REPLICATE] Загрузка изображения по URL: {result_url[:100]}...")
-                    img_response = requests.get(result_url, timeout=30)
+                    from nano_banana.config import settings as app_settings
+                    from nano_banana.security import assert_safe_outbound_image_url
+                    assert_safe_outbound_image_url(result_url, app_settings)
+                    img_response = requests.get(result_url, timeout=30, allow_redirects=False)
                     if img_response.status_code == 200:
                         result_data = img_response.content
                         logger.info(f"[REPLICATE] Изображение загружено, размер: {len(result_data)} байт")

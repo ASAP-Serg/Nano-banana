@@ -2,9 +2,9 @@
 from datetime import datetime
 import threading
 import time
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import or_
 
 from nano_banana.auth import auth_service
@@ -32,16 +32,44 @@ def _rate_limit_auth(scope: str, identifier: str, max_attempts: int, window_seco
 
 
 def _client_ip(request: Request) -> str:
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip().lower()
+    client_host = request.client.host if request.client else None
+    if client_host and client_host not in ("127.0.0.1", "::1"):
+        return client_host.lower()
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
         return forwarded.split(",")[0].strip().lower()
-    if request.client and request.client.host:
-        return request.client.host
+    if client_host:
+        return client_host.lower()
     return "unknown"
 
 
+def _bootstrap_secret_ok(header_secret: Optional[str]) -> bool:
+    expected = (settings.ADMIN_BOOTSTRAP_SECRET or "").strip()
+    if not expected or not header_secret:
+        return False
+    return header_secret.strip() == expected
+
+
 @router.post("/register", response_model=Token)
-async def register(user_data: UserCreateRequest, request: Request):
+async def register(
+    user_data: UserCreateRequest,
+    request: Request,
+    x_admin_bootstrap_secret: Annotated[Optional[str], Header()] = None,
+):
+    with db_service.get_session() as session:
+        users_count = session.query(User).count()
+
+    bootstrap_ok = _bootstrap_secret_ok(x_admin_bootstrap_secret)
+    if not settings.SECURITY_ALLOW_PUBLIC_REGISTER:
+        if not (bootstrap_ok and users_count == 0):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Регистрация отключена. Обратитесь к администратору.",
+            )
+
     _rate_limit_auth(
         "register",
         _client_ip(request),
@@ -59,13 +87,14 @@ async def register(user_data: UserCreateRequest, request: Request):
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Пользователь с таким именем или email уже существует",
             )
+        make_admin = users_count == 0 and bootstrap_ok
         hashed_password = auth_service.get_password_hash(user_data.password)
         new_user = User(
             username=user_data.username,
             email=user_data.email,
             hashed_password=hashed_password,
             is_active=True,
-            is_admin=(users_count == 0),
+            is_admin=make_admin,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
             last_login=datetime.utcnow(),
@@ -81,10 +110,19 @@ async def register(user_data: UserCreateRequest, request: Request):
 
 
 @router.post("/login", response_model=Token)
-async def login(user_data: UserLoginRequest):
+async def login(user_data: UserLoginRequest, request: Request):
+    ip = _client_ip(request)
+    ident = user_data.username_or_email.strip().lower()
     _rate_limit_auth(
-        "login",
-        user_data.username_or_email.strip().lower(),
+        "login-ip",
+        ip,
+        settings.SECURITY_LOGIN_MAX_ATTEMPTS * 3,
+        settings.SECURITY_LOGIN_WINDOW_SECONDS,
+        "Слишком много попыток входа с этого адреса. Попробуйте позже.",
+    )
+    _rate_limit_auth(
+        "login-user",
+        f"{ip}:{ident}",
         settings.SECURITY_LOGIN_MAX_ATTEMPTS,
         settings.SECURITY_LOGIN_WINDOW_SECONDS,
         "Слишком много попыток входа. Попробуйте позже.",

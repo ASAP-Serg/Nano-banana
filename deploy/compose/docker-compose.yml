@@ -51,7 +51,7 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin123};
       mc mb local/nano-banana-images --ignore-existing;
-      mc anonymous set download local/nano-banana-images;
+      mc anonymous set none local/nano-banana-images;
       exit 0;
       "
     environment:

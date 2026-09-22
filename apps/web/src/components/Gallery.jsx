@@ -6,6 +6,16 @@ function statusLabel(item) {
   return item.status;
 }
 
+function isSafeMediaUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  try {
+    const u = new URL(url, window.location.origin);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export default function Gallery({
   user,
   gallery,
@@ -37,7 +47,7 @@ export default function Gallery({
           {gallery.map((item, idx) => (
             <div className="col gallery-card-wrap" key={item.id}>
               <div className="card h-100">
-                {item.result_url ? (
+                {item.result_url && isSafeMediaUrl(item.result_url) ? (
                   <div className="image-container">
                     <img
                       src={item.result_url}

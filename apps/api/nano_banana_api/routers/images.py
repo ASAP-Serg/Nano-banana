@@ -166,7 +166,11 @@ async def list_generations(
                 generation_mode=gen.generation_mode,
                 resolution=gen.resolution,
                 aspect_ratio=gen.aspect_ratio,
-                result_url=gen.result_url,
+                result_url=_storage().refresh_access_url(
+                    getattr(gen, "result_path", None) or gen.result_url
+                )
+                if gen.result_url
+                else gen.result_url,
                 status=gen.status,
                 created_at=gen.created_at,
                 error_message=meta.get("error"),
@@ -268,8 +272,15 @@ async def get_generation_full(
             "num_inference_steps": generation.num_inference_steps,
             "seed": generation.seed,
             "model_name": model_name,
-            "reference_images": metadata.get("reference_image_urls", []),
-            "result_url": generation.result_url,
+            "reference_images": [
+                _storage().refresh_access_url(u) or u
+                for u in (metadata.get("reference_image_urls", []) or [])
+            ],
+            "result_url": _storage().refresh_access_url(
+                getattr(generation, "result_path", None) or generation.result_url
+            )
+            if generation.result_url
+            else generation.result_url,
             "status": generation.status,
             "error_message": metadata.get("error"),
             **rewrite_metadata_fields(metadata),

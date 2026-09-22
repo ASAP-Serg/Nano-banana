@@ -36,6 +36,10 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Prod exports / secret dumps
+deploy-export/
+prod.env
+
 # Временные файлы
 *.tmp
 *.bak

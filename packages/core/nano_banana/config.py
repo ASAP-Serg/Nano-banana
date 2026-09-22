@@ -1,6 +1,24 @@
 """Конфигурация приложения."""
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_WEAK_SECRET_KEYS = {
+    "",
+    "secret",
+    "changeme",
+    "change-me",
+    "your-secret-key-change-in-production",
+    "nano_banana_secret",
+    "change-me-jwt-secret-min-32-characters-long",
+}
+_WEAK_PASSWORDS = {
+    "nano_banana_pass",
+    "password",
+    "postgres",
+    "minioadmin123",
+    "minioadmin",
+    "change-me",
+}
 
 
 class Settings(BaseSettings):
@@ -11,7 +29,8 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "minioadmin123"
     MINIO_SECURE: bool = False
     MINIO_BUCKET: str = "nano-banana-images"
-    MINIO_PUBLIC_URL: str = "http://localhost:9002"
+    MINIO_PUBLIC_URL: str = "http://localhost:9000"
+    MINIO_PRESIGN_EXPIRES_SECONDS: int = 604800
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -29,7 +48,8 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     DATA_ENCRYPTION_KEY: str = ""
     REDIS_URL: str = "redis://localhost:6379/0"
-    S3_PUBLIC_READ: bool = True
+    # Beget: false + presigned URLs. Local MinIO can set true for convenience.
+    S3_PUBLIC_READ: bool = False
     WORKER_ID: str = ""
     JOB_LOCK_TTL_SECONDS: int = 180
     STUCK_GENERATION_MINUTES: int = 20
@@ -37,6 +57,8 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 180
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PWD_SCHEMES: str = "bcrypt"
+    SECURITY_ALLOW_PUBLIC_REGISTER: bool = False
+    ADMIN_BOOTSTRAP_SECRET: str = ""
 
     BANANALAB_API_BASE_URL: str = "https://api.moonez.ai/api"
     REPLICATE_API_TOKEN: str = ""
@@ -77,7 +99,7 @@ class Settings(BaseSettings):
     MAX_WORKERS: int = 1
     MAX_CONCURRENT_GENERATIONS: int = 1
 
-    CORS_ORIGINS: str = "*"
+    CORS_ORIGINS: str = "http://localhost:8000"
     API_URL: str = "http://localhost:8000"
 
     SECURITY_STRICT_CSP: bool = True
@@ -86,12 +108,26 @@ class Settings(BaseSettings):
     SECURITY_LOGIN_WINDOW_SECONDS: int = 300
     SECURITY_ADMIN_READ_MAX_REQUESTS: int = 120
     SECURITY_ADMIN_READ_WINDOW_SECONDS: int = 60
-    SECURITY_CSP_ALLOW_INLINE_SCRIPTS: bool = True
+    SECURITY_CSP_ALLOW_INLINE_SCRIPTS: bool = False
     SECURITY_CSP_ALLOW_MINIO_CONSOLE_FRAME: bool = False
-    SECURITY_DISABLE_OPENAPI: bool = False
+    SECURITY_DISABLE_OPENAPI: bool = True
     SECURITY_REGISTER_MAX_ATTEMPTS: int = 10
     SECURITY_REGISTER_WINDOW_SECONDS: int = 3600
     SECURITY_ALLOWED_REF_URL_HOSTS: str = ""
+    SECURITY_ALLOWED_OUTBOUND_IMAGE_HOSTS: str = ""
+
+    @model_validator(mode="after")
+    def _reject_weak_secrets(self):
+        sk = (self.SECRET_KEY or "").strip()
+        if len(sk) < 32 or sk.lower() in _WEAK_SECRET_KEYS:
+            raise ValueError(
+                "SECRET_KEY must be a strong value (>=32 chars). Do not use example defaults."
+            )
+        if (self.POSTGRES_PASSWORD or "").strip().lower() in _WEAK_PASSWORDS:
+            raise ValueError("POSTGRES_PASSWORD is weak — set a strong password in .env")
+        if (self.MINIO_SECRET_KEY or "").strip().lower() in _WEAK_PASSWORDS:
+            raise ValueError("MINIO_SECRET_KEY is weak — set a strong password in .env")
+        return self
 
 
 settings = Settings()

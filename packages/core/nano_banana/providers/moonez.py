@@ -305,7 +305,10 @@ class BananalabService:
                 fallback_b64: List[str] = []
                 for idx, img_url in enumerate(input_url_list, 1):
                     try:
-                        r = requests.get(img_url, timeout=30)
+                        from nano_banana.config import settings as app_settings
+                        from nano_banana.security import assert_safe_outbound_image_url
+                        assert_safe_outbound_image_url(img_url, app_settings)
+                        r = requests.get(img_url, timeout=30, allow_redirects=False)
                         if r.status_code == 200:
                             img_data = _optimize_image_for_api(r.content, idx)
                             fallback_b64.append(base64.b64encode(img_data).decode("ascii"))

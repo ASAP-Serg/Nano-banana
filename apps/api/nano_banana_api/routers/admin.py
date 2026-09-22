@@ -15,10 +15,19 @@ from nano_banana.tokens import TokenPayload
 from nano_banana.auth import auth_service
 from nano_banana.db.session import db_service
 from nano_banana.config import settings
+from nano_banana.storage.s3 import MinioService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 _admin_read_attempts = {}
 _admin_read_lock = threading.Lock()
+_minio: Optional[MinioService] = None
+
+
+def _storage() -> MinioService:
+    global _minio
+    if _minio is None:
+        _minio = MinioService()
+    return _minio
 
 
 def _require_admin(user: TokenPayload):
@@ -84,8 +93,15 @@ def _generation_full_payload(gen: Generation, username: Optional[str] = None) ->
         "num_inference_steps": gen.num_inference_steps,
         "seed": gen.seed,
         "model_name": model_name,
-        "reference_images": metadata.get("reference_image_urls") or [],
-        "result_url": gen.result_url,
+        "reference_images": [
+            _storage().refresh_access_url(u) or u
+            for u in (metadata.get("reference_image_urls") or [])
+        ],
+        "result_url": _storage().refresh_access_url(
+            getattr(gen, "result_path", None) or gen.result_url
+        )
+        if gen.result_url
+        else gen.result_url,
         "status": gen.status,
         "error_message": metadata.get("error"),
         "provider": _infer_provider(gen),
@@ -290,7 +306,11 @@ async def admin_list_generations(
                     "model_name": gen.model_name,
                     "resolution": gen.resolution,
                     "aspect_ratio": gen.aspect_ratio,
-                    "result_url": gen.result_url,
+                    "result_url": _storage().refresh_access_url(
+                        getattr(gen, "result_path", None) or gen.result_url
+                    )
+                    if gen.result_url
+                    else gen.result_url,
                     "error": metadata.get("error"),
                     "error_message": metadata.get("error"),
                     "created_at": gen.created_at.isoformat() if gen.created_at else None,

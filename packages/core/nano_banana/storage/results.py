@@ -57,6 +57,15 @@ def download_image_from_url(
     retries: int = DOWNLOAD_RETRIES,
 ) -> Optional[bytes]:
     """Скачивает изображение по URL с повторами (stream + fallback без stream)."""
+    from nano_banana.config import settings
+    from nano_banana.security import assert_safe_outbound_image_url
+
+    try:
+        assert_safe_outbound_image_url(image_url, settings)
+    except ValueError as blocked:
+        logger.error("[RESULT] SSRF block: %s (%s)", blocked, image_url[:120])
+        return None
+
     last_err: Optional[str] = None
     session = _download_session()
     for attempt in range(1, retries + 1):
@@ -74,7 +83,19 @@ def download_image_from_url(
                     image_url,
                     timeout=(DOWNLOAD_CONNECT_TIMEOUT, read_timeout),
                     stream=stream,
+                    allow_redirects=False,
                 )
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    loc = resp.headers.get("Location") or ""
+                    resp.close()
+                    try:
+                        assert_safe_outbound_image_url(loc, settings)
+                    except ValueError:
+                        last_err = "redirect blocked by SSRF policy"
+                        continue
+                    image_url = loc
+                    last_err = "following safe redirect"
+                    continue
                 if resp.status_code != 200:
                     last_err = f"HTTP {resp.status_code}"
                     resp.close()

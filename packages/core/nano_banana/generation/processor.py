@@ -84,8 +84,12 @@ def _decrypt_api_key(token: Optional[str]) -> Optional[str]:
 def _build_resume_payload(generation: Generation, request_data: dict) -> Dict[str, Any]:
     metadata = generation.generation_metadata or {}
     plain_api_key = request_data.get("api_key")
+    encrypted = request_data.get("api_key_encrypted") or ""
+    if plain_api_key and not encrypted:
+        encrypted = _encrypt_api_key(plain_api_key)
     return {
-        "api_key_encrypted": _encrypt_api_key(plain_api_key) if plain_api_key else request_data.get("api_key_encrypted") or "",
+        # Только шифрованная форма — plaintext api_key не сохраняем.
+        "api_key_encrypted": encrypted,
         "prompt": request_data.get("prompt") or generation.prompt,
         "negative_prompt": request_data.get("negative_prompt") or generation.negative_prompt,
         "resolution": request_data.get("resolution") or generation.resolution,
