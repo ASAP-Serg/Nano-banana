@@ -231,9 +231,11 @@ export default function App() {
               user={user}
               models={models}
               defaultModel={defaultModel}
+              keys={keys}
               busy={busy}
               onGenerate={onGenerate}
               onNeedLogin={() => setShowLogin(true)}
+              onNeedKeys={() => setShowKeys(true)}
             />
           </div>
           <div className="col-lg-8">
@@ -273,7 +275,16 @@ export default function App() {
         onLogin={onLogin}
         onRegister={onRegister}
       />
-      {showKeys && <KeysModal keys={keys} onClose={() => setShowKeys(false)} onSaved={setKeys} />}
+      {showKeys && (
+        <KeysModal
+          keys={keys}
+          onClose={() => setShowKeys(false)}
+          onSaved={(next) => {
+            setKeys(next);
+            loadModels();
+          }}
+        />
+      )}
       {lightbox != null && (
         <Lightbox items={lightboxItems} index={lightbox} onClose={() => setLightbox(null)} onIndex={setLightbox} />
       )}

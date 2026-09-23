@@ -352,16 +352,14 @@ body {
 }
 
 #imageGrid .card {
-    transition: transform 0.2s;
+    transition: box-shadow 0.2s;
 }
 
 #imageGrid .card:hover {
-    transform: translateY(-5px);
     box-shadow: 0 8px 16px rgba(0,0,0,0.2);
 }
-/* галерейные карточки при hover слегка увеличиваются, а не сдвигаются */
 #imageGrid .gallery-card-wrap:hover {
-    transform: scale(1.08);
+    transform: scale(1.03);
     box-shadow: 0 12px 24px rgba(102, 126, 234, 0.35);
 }
 
@@ -542,6 +540,13 @@ body {
     min-height: 40px;
     border-radius: calc(var(--radius) - 2px);
     border-left: 3px solid transparent;
+    width: 100%;
+    background: transparent;
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    text-align: left;
+    font-family: inherit;
 }
 
 .custom-dropdown-item:hover {
@@ -934,15 +939,31 @@ button.info-btn:hover,
     transform-origin: center center;
     transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
+#imageGrid .gallery-card-wrap > .card {
+    height: auto;
+}
+#imageGrid .gallery-card-wrap > .card > .card-body {
+    flex: 0 0 auto;
+}
+#imageGrid .image-container {
+    position: relative;
+    overflow: hidden;
+    line-height: 0;
+    background: transparent;
+}
+#imageGrid .generation-image {
+    display: block;
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    background: transparent;
+}
 .gallery-card-wrap .image-container .generation-image {
-    transition: object-fit 0.25s ease;
+    transition: transform 0.25s ease;
 }
 .gallery-card-wrap:hover {
-    transform: scale(1.08);
+    transform: scale(1.03);
     box-shadow: 0 12px 24px rgba(102, 126, 234, 0.35);
-}
-.gallery-card-wrap:hover .image-container .generation-image {
-    object-fit: contain !important;
 }
 
 .prompt-text {

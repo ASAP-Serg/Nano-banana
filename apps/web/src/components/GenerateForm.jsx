@@ -1,5 +1,20 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
-import { ASPECTS, GROUP_LABELS, fileToDataUrl, toast } from "../toast.js";
+import { ASPECTS, GROUP_LABELS, PROVIDER_BADGE, fileToDataUrl, toast } from "../toast.js";
+
+const GROUP_ORDER = ["bananalab", "replicate", "openrouter"];
+
+function modelHasKey(meta, keys) {
+  const ready = typeof keys?.has_bananalab_key === "boolean";
+  if (!ready) return meta?.available !== false;
+  const flag = {
+    bananalab: Boolean(keys.has_bananalab_key),
+    replicate: Boolean(keys.has_replicate_key),
+    openrouter: Boolean(keys.has_openrouter_key),
+  };
+  const providers = meta?.providers || [];
+  if (!providers.length) return flag.bananalab || flag.replicate || flag.openrouter;
+  return providers.some((provider) => flag[provider]);
+}
 
 async function collectImageFiles(fileList) {
   const next = [];
@@ -10,7 +25,16 @@ async function collectImageFiles(fileList) {
   return next;
 }
 
-const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultModel, busy, onGenerate, onNeedLogin }, ref) {
+const GenerateForm = forwardRef(function GenerateForm({
+  user,
+  models,
+  defaultModel,
+  keys = {},
+  busy,
+  onGenerate,
+  onNeedLogin,
+  onNeedKeys,
+}, ref) {
   const [mode, setMode] = useState("text-to-image");
   const [modelName, setModelName] = useState(() => localStorage.getItem("nb_model") || defaultModel || "nano-banana-pro");
   const [prompt, setPrompt] = useState("");
@@ -19,6 +43,7 @@ const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultMod
   const [resolution, setResolution] = useState("1K");
   const [aspect, setAspect] = useState("1:1");
   const [aspectOpen, setAspectOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   const [steps, setSteps] = useState(50);
   const [guidance, setGuidance] = useState(7.5);
   const [seed, setSeed] = useState("");
@@ -30,18 +55,26 @@ const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultMod
 
   useEffect(() => {
     if (!models || Object.keys(models).length === 0) return;
-    if (models[modelName]) return;
-    const fallback = models[defaultModel] ? defaultModel : Object.keys(models)[0];
+    if (typeof keys.has_bananalab_key !== "boolean") return;
+    if (models[modelName] && modelHasKey(models[modelName], keys)) return;
+    const ids = Object.keys(models);
+    const fallback =
+      ids.find((id) => modelHasKey(models[id], keys)) ||
+      (models[defaultModel] ? defaultModel : ids[0]);
+    if (!fallback || fallback === modelName) return;
     setModelName(fallback);
     localStorage.setItem("nb_model", fallback);
-  }, [models, modelName, defaultModel]);
+  }, [models, modelName, defaultModel, keys]);
 
   useEffect(() => {
-    if (!aspectOpen) return undefined;
-    const close = () => setAspectOpen(false);
+    if (!aspectOpen && !modelOpen) return undefined;
+    const close = () => {
+      setAspectOpen(false);
+      setModelOpen(false);
+    };
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
-  }, [aspectOpen]);
+  }, [aspectOpen, modelOpen]);
 
   useImperativeHandle(ref, () => ({
     applyGeneration(gen, { modelOverride } = {}) {
@@ -75,6 +108,7 @@ const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultMod
     const key = m.group || m.color || "other";
     (grouped[key] ||= []).push([id, m]);
   });
+  const modelUnlocked = modelHasKey(modelEntry, keys);
 
   async function addFiles(files) {
     const extra = await collectImageFiles(files);
@@ -110,6 +144,11 @@ const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultMod
     e.preventDefault();
     if (!user) {
       onNeedLogin();
+      return;
+    }
+    if (!modelHasKey(models[modelName], keys)) {
+      toast("Добавьте нужный API ключ в настройках", "warning");
+      onNeedKeys?.();
       return;
     }
     await onGenerate({
@@ -152,30 +191,74 @@ const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultMod
           </div>
           <div className="mb-3">
             <label className="form-label">Модель</label>
-            <select
-              className="form-select"
-              value={modelName}
-              onChange={(e) => {
-                setModelName(e.target.value);
-                localStorage.setItem("nb_model", e.target.value);
-              }}
-            >
-              {Object.keys(models).length === 0 && <option value={defaultModel}>{defaultModel}</option>}
-              {Object.entries(grouped).map(([group, entries]) => (
-                <optgroup key={group} label={GROUP_LABELS[group] || group}>
-                  {entries.map(([id, m]) => (
-                    <option key={id} value={id}>
-                      {m.display_name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <small className="text-muted d-block mt-1">{modelEntry.description}</small>
+            <div className="custom-dropdown model-dropdown">
+              <div
+                className={`custom-dropdown-selected ${modelOpen ? "active" : ""}`}
+                role="button"
+                tabIndex={0}
+                aria-haspopup="listbox"
+                aria-expanded={modelOpen}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAspectOpen(false);
+                  setModelOpen((open) => !open);
+                }}
+              >
+                <span className={`model-provider-badge model-badge-selected model-badge-${modelEntry.color || "replicate"}`}>
+                  {PROVIDER_BADGE[modelEntry.color] || modelEntry.color || ""}
+                </span>
+                <span className="custom-dropdown-text">{modelEntry.display_name || modelName}</span>
+                <span className="custom-dropdown-arrow">▾</span>
+              </div>
+              <div className={`custom-dropdown-menu model-dropdown-menu ${modelOpen ? "show" : ""}`} role="listbox">
+                {GROUP_ORDER.filter((group) => grouped[group]?.length).map((group) => (
+                  <div key={group} className="custom-dropdown-group">
+                    <div className="custom-dropdown-group-label">{GROUP_LABELS[group] || group}</div>
+                    {grouped[group].map(([id, m]) => {
+                      const enabled = modelHasKey(m, keys);
+                      return (
+                        <button
+                          type="button"
+                          key={id}
+                          role="option"
+                          className={`custom-dropdown-item model-dropdown-item model-tone-${m.color || "replicate"} ${
+                            id === modelName ? "selected" : ""
+                          } ${enabled ? "" : "is-disabled"}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!enabled) {
+                              toast("Добавьте нужный API ключ в настройках", "warning");
+                              onNeedKeys?.();
+                              return;
+                            }
+                            setModelName(id);
+                            localStorage.setItem("nb_model", id);
+                            setModelOpen(false);
+                          }}
+                        >
+                          <span className={`model-provider-badge model-badge-${m.color || "replicate"}`}>
+                            {PROVIDER_BADGE[m.color] || m.color}
+                          </span>
+                          <span className="model-dropdown-item-title">{m.display_name}</span>
+                          {!enabled && (
+                            <span className="model-dropdown-item-lock" title="Нужен API ключ">
+                              <i className="fas fa-lock" />
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <small className="text-muted d-block mt-1">
+              {modelUnlocked ? modelEntry.description : "Для этой модели нужен API ключ"}
+            </small>
             <div className="model-provider-legend mt-2">
-              {Object.keys(grouped).map((key) => (
+              {Object.entries(GROUP_LABELS).map(([key, label]) => (
                 <span key={key} className={`model-legend-item model-legend-${key}`}>
-                  {GROUP_LABELS[key] || key}
+                  {label}
                 </span>
               ))}
             </div>
