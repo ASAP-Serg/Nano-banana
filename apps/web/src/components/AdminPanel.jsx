@@ -2,6 +2,17 @@ import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { toast } from "../toast.js";
 import { IconToForm } from "../icons.jsx";
+import Lightbox from "./Lightbox.jsx";
+
+function isSafeMediaUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  try {
+    const u = new URL(url, window.location.origin);
+    return u.protocol === "https:" || u.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
 
 export default function AdminPanel({ onClose, onInsertToForm }) {
   const [users, setUsers] = useState([]);
@@ -17,6 +28,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
     error_only: false,
   });
   const [page, setPage] = useState(0);
+  const [lightbox, setLightbox] = useState(null);
   const pageSize = 24;
 
   async function load() {
@@ -222,22 +234,32 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
             <div className="row row-cols-1 row-cols-md-3 g-3">
               {gens.map((g) => (
                 <div className="col" key={g.id}>
-                  <div className="card">
-                    {g.result_url && (
-                      <img
-                        src={g.result_url}
-                        className="card-img-top"
-                        alt=""
-                        style={{ cursor: "pointer" }}
-                        onClick={() => onInsertToForm(g.id)}
-                      />
-                    )}
+                  <div className="card admin-gen-card">
+                    <div className="admin-gen-thumb">
+                      {g.result_url && isSafeMediaUrl(g.result_url) ? (
+                        <img
+                          src={g.result_url}
+                          alt=""
+                          onClick={() => {
+                            const items = gens.filter((item) => item.result_url && isSafeMediaUrl(item.result_url));
+                            const idx = items.findIndex((item) => item.id === g.id);
+                            if (idx >= 0) setLightbox(idx);
+                          }}
+                        />
+                      ) : (
+                        <div className="admin-gen-thumb-empty">{g.status || "нет фото"}</div>
+                      )}
+                    </div>
                     <div className="card-body small">
                       <div>
                         {g.username} · {g.status} · {g.model_name}
                       </div>
                       <div className="text-muted">{g.prompt}</div>
-                      <button type="button" className="btn btn-sm btn-outline-primary mt-2 d-inline-flex align-items-center gap-2" onClick={() => onInsertToForm(g.id)}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary mt-2 d-inline-flex align-items-center gap-2"
+                        onClick={() => onInsertToForm(g.id)}
+                      >
                         <IconToForm />
                         В форму
                       </button>
@@ -249,6 +271,14 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
           </div>
         </div>
       </div>
+      {lightbox != null && (
+        <Lightbox
+          items={gens.filter((item) => item.result_url && isSafeMediaUrl(item.result_url))}
+          index={lightbox}
+          onClose={() => setLightbox(null)}
+          onIndex={setLightbox}
+        />
+      )}
     </div>
   );
 }

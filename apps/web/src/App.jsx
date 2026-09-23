@@ -177,8 +177,6 @@ export default function App() {
     try {
       const gen = await api.adminGeneration(id);
       generateRef.current?.applyGeneration(gen);
-      setShowAdmin(false);
-      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       toast(err.message, "error");
     }
