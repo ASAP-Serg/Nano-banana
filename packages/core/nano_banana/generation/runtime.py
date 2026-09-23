@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Dict, Optional
+import logging
 
 from nano_banana.providers.errors import (
     is_bananalab_paused_message,
@@ -10,6 +11,8 @@ from nano_banana.providers.errors import (
 )
 from nano_banana.providers.moonez import BananalabService
 from nano_banana.queue.jobs import get_job_queue
+
+logger = logging.getLogger(__name__)
 
 BANANALAB_HEALTH_PROBE_TTL_SECONDS = 45
 BANANALAB_UPSTREAM_DEGRADED_WINDOW_SECONDS = 1800
@@ -21,11 +24,18 @@ def _now_iso() -> str:
 
 
 def _state() -> Dict[str, Any]:
-    return get_job_queue().get_provider_state()
+    try:
+        return get_job_queue().get_provider_state()
+    except Exception as exc:
+        logger.warning("[RUNTIME] redis state read failed: %s", exc)
+        return {}
 
 
 def _set(**fields: Any) -> None:
-    get_job_queue().set_provider_state(fields)
+    try:
+        get_job_queue().set_provider_state(fields)
+    except Exception as exc:
+        logger.warning("[RUNTIME] redis state write failed: %s", exc)
 
 
 def _get(key: str) -> Optional[str]:
@@ -124,7 +134,11 @@ def is_paused() -> bool:
     if is_bananalab_paused_message(last_error):
         if last_paused and (not last_success or str(last_success) < str(last_paused)):
             return True
-    queue_size = get_job_queue().queue_size()
+    try:
+        queue_size = get_job_queue().queue_size()
+    except Exception as exc:
+        logger.warning("[RUNTIME] queue size failed: %s", exc)
+        queue_size = 0
     if queue_size > 0 and last_paused:
         if not last_success or str(last_success) < str(last_paused):
             return True

@@ -1,6 +1,7 @@
 """Сводный статус Moonez + Google + пользователь для баннера."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -12,6 +13,8 @@ from nano_banana.providers.models import DEFAULT_MODEL_ID, get_provider_for_mode
 from nano_banana.queue.jobs import get_job_queue
 from nano_banana.status.google import get_google_gemini_status
 from nano_banana.status.user import USER_STATUS_SAMPLE_SIZE, build_user_generation_status
+
+logger = logging.getLogger(__name__)
 
 USER_STATUS_LOOKBACK_HOURS = 24
 
@@ -81,6 +84,25 @@ def _merge_user(payload: Dict[str, Any], user_status: Dict[str, Any]) -> None:
 
 
 def build_public_service_status(
+    user_id: Optional[int] = None,
+    *,
+    include_internals: bool = False,
+) -> Dict[str, Any]:
+    try:
+        return _build_public_service_status(user_id, include_internals=include_internals)
+    except Exception as exc:
+        logger.exception("[STATUS] public status failed: %s", exc)
+        return {
+            "provider": "bananalab",
+            "state": "unknown",
+            "can_generate": True,
+            "message": "Не удалось проверить статус сервисов.",
+            "updated_at": datetime.utcnow().isoformat(),
+            "services": [],
+        }
+
+
+def _build_public_service_status(
     user_id: Optional[int] = None,
     *,
     include_internals: bool = False,

@@ -26,6 +26,17 @@ export default function KeysModal({ keys, onClose, onSaved }) {
         Ключи хранятся на сервере в зашифрованном виде. Moonez — <code>bh_</code>, Replicate — <code>r8_</code>, OpenRouter —{" "}
         <code>sk-or</code>.
       </p>
+      <p className="small">
+        Кабинет Moonez:{" "}
+        <a href="https://moonez.ai" target="_blank" rel="noreferrer">
+          moonez.ai
+        </a>
+        {" · "}
+        ключи и <strong>IP Whitelist</strong> в панели. Без IP сервера Moonez отвечает 403.{" "}
+        <a href="https://docs.moonez.ai/authentication" target="_blank" rel="noreferrer">
+          Документация
+        </a>
+      </p>
       <p className="small text-muted">
         Сейчас: Moonez {keys.has_bananalab_key ? "есть" : "нет"}, Replicate {keys.has_replicate_key ? "есть" : "нет"}, OpenRouter{" "}
         {keys.has_openrouter_key ? "есть" : "нет"}

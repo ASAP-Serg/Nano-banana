@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
 
 # Only the personal VPS repo. The company copy must not SSH anywhere.
-if: github.repository == 'ASAP-Serg/Nano-banana'
 
 jobs:
   deploy:
+    if: github.repository == 'ASAP-Serg/Nano-banana'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Beget

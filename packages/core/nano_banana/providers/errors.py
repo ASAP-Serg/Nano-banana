@@ -378,8 +378,9 @@ def humanize_api_error(
     if http_status == 403 or "403 forbidden" in text.lower() or text.strip().lower() == "forbidden":
         if provider == "bananalab":
             return (
-                "Moonez отклонил запрос (403). Обычно это ключ bh_, баланс или доступ к модели. "
-                "Пересохраните ключ в настройках, проверьте кабинет Moonez или попробуйте Replicate (r8_)."
+                "Moonez отклонил запрос (403). Чаще всего это IP whitelist: "
+                "в кабинете https://moonez.ai добавьте исходящий IP сервера "
+                "(раздел IP Whitelist), либо проверьте ключ bh_, баланс и доступ к модели."
             )
         if provider == "openrouter":
             return OPENROUTER_ACCOUNT_GUARD_MESSAGE
