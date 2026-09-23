@@ -949,10 +949,16 @@ button.info-btn:hover,
     box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
 }
 
+.nb-workspace-gallery > .card,
+.admin-shell {
+    overflow: visible;
+}
+
 .media-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
     gap: 1rem;
+    padding: 0.35rem;
 }
 
 .media-grid-empty {
@@ -990,11 +996,21 @@ button.info-btn:hover,
 
 .gallery-card-wrap {
     min-width: 0;
+    position: relative;
+    z-index: 1;
+    transform-origin: center center;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gallery-card-wrap:hover {
+    transform: scale(1.07);
+    z-index: 5;
 }
 
 .gallery-card-wrap > .card,
 .admin-gen-card {
     height: 100%;
+    overflow: hidden;
 }
 
 .gallery-card-wrap > .card > .card-body,

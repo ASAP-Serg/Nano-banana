@@ -466,5 +466,22 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertIn("Gemini", status["active_incidents"][0]["title"])
 
 
+class TestPublicServiceStatus(unittest.TestCase):
+    def test_fallback_still_returns_service_cards(self):
+        from unittest.mock import patch
+
+        from nano_banana.status.services import build_public_service_status
+
+        with patch(
+            "nano_banana.status.services._build_public_service_status",
+            side_effect=RuntimeError("boom"),
+        ):
+            payload = build_public_service_status(user_id=1)
+
+        self.assertEqual(payload["state"], "unknown")
+        ids = [svc["id"] for svc in payload["services"]]
+        self.assertEqual(ids, ["moonez", "google_gemini"])
+
+
 if __name__ == "__main__":
     unittest.main()

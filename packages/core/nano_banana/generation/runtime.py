@@ -105,7 +105,11 @@ def health_status() -> tuple[bool, Optional[str]]:
                 return ok, _get("health_probe_error")
         except ValueError:
             pass
-    reachable, probe_error = BananalabService.probe_reachable()
+    try:
+        reachable, probe_error = BananalabService.probe_reachable()
+    except Exception as exc:
+        logger.warning("[RUNTIME] health probe failed: %s", exc)
+        return True, None
     _set(
         health_probe_at=str(now_ts),
         health_probe_ok="1" if reachable else "0",
@@ -148,7 +152,10 @@ def is_paused() -> bool:
 def is_upstream_degraded() -> bool:
     last_upstream = _get("last_upstream_error_at")
     last_success = _get("last_success_at")
-    error_count = int(_get("upstream_error_count") or 0)
+    try:
+        error_count = int(_get("upstream_error_count") or 0)
+    except (TypeError, ValueError):
+        error_count = 0
     if error_count < BANANALAB_UPSTREAM_DEGRADED_MIN_ERRORS or not last_upstream:
         return False
     if last_success and str(last_success) >= str(last_upstream):

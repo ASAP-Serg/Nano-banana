@@ -74,7 +74,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
   return (
     <div className="row g-4 justify-content-center mt-2">
       <div className="col-12">
-        <div className="card shadow">
+        <div className="card shadow admin-shell">
           <div className="card-header d-flex justify-content-between">
             <h5 className="mb-0">Админ-панель</h5>
             <button className="btn btn-sm btn-outline-light" onClick={onClose}>
@@ -233,7 +233,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
             </div>
             <div className="media-grid">
               {gens.map((g) => (
-                <div key={g.id}>
+                <div className="gallery-card-wrap" key={g.id}>
                   <div className="card admin-gen-card">
                     <div className="media-thumb">
                       {g.result_url && isSafeMediaUrl(g.result_url) ? (

@@ -35,7 +35,7 @@ def _load_user_generation_status(user_id: int) -> Dict[str, Any]:
         )
     payload_rows = []
     for gen in rows:
-        meta = gen.generation_metadata or {}
+        meta = gen.generation_metadata if isinstance(gen.generation_metadata, dict) else {}
         payload_rows.append(
             {
                 "id": gen.id,
@@ -83,6 +83,28 @@ def _merge_user(payload: Dict[str, Any], user_status: Dict[str, Any]) -> None:
         )
 
 
+def _unknown_service_cards() -> list:
+    return [
+        {
+            "id": "moonez",
+            "name": "Moonez API",
+            "short_name": "Moonez",
+            "state": "unknown",
+            "message": "Статус Moonez не получен.",
+            "source": "health_probe",
+        },
+        {
+            "id": "google_gemini",
+            "name": "Google Gemini",
+            "short_name": "Google AI",
+            "state": "unknown",
+            "message": "Статус Google не проверен — смотрим только наш мониторинг.",
+            "source": "runtime_probe",
+            "status_page_url": "https://status.cloud.google.com/",
+        },
+    ]
+
+
 def build_public_service_status(
     user_id: Optional[int] = None,
     *,
@@ -98,7 +120,7 @@ def build_public_service_status(
             "can_generate": True,
             "message": "Не удалось проверить статус сервисов.",
             "updated_at": datetime.utcnow().isoformat(),
-            "services": [],
+            "services": _unknown_service_cards(),
         }
 
 
@@ -107,8 +129,21 @@ def _build_public_service_status(
     *,
     include_internals: bool = False,
 ) -> Dict[str, Any]:
-    google_status = get_google_gemini_status()
-    reachable, probe_error = runtime.health_status()
+    try:
+        google_status = get_google_gemini_status()
+    except Exception as exc:
+        logger.warning("[STATUS] google status failed: %s", exc)
+        google_status = {
+            "fetch_ok": False,
+            "has_active_incident": False,
+            "active_incidents": [],
+            "status_page_url": "https://status.cloud.google.com/",
+        }
+    try:
+        reachable, probe_error = runtime.health_status()
+    except Exception as exc:
+        logger.warning("[STATUS] moonez probe failed: %s", exc)
+        reachable, probe_error = True, None
     is_unavailable = not reachable or runtime.is_unavailable()
     is_paused = (not is_unavailable) and runtime.is_paused()
     is_runtime_degraded = runtime.is_upstream_degraded()
@@ -233,7 +268,10 @@ def _build_public_service_status(
             "queue_size": queue_size,
         }
     if user_id is not None:
-        _merge_user(payload, _load_user_generation_status(user_id))
+        try:
+            _merge_user(payload, _load_user_generation_status(user_id))
+        except Exception as exc:
+            logger.warning("[STATUS] user history failed: %s", exc)
     return payload
 
 
