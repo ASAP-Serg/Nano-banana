@@ -1,6 +1,6 @@
 export default function Modal({ title, onClose, children, wide = false }) {
   return (
-    <div className="modal d-block" style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose}>
+    <div className="modal d-block nb-modal" style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose}>
       <div className={`modal-dialog ${wide ? "modal-lg" : ""}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-content">
           <div className="modal-header">

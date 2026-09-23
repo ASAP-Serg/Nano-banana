@@ -48,6 +48,7 @@ const GenerateForm = forwardRef(function GenerateForm({
   const [guidance, setGuidance] = useState(7.5);
   const [seed, setSeed] = useState("");
   const [refs, setRefs] = useState([]);
+  const [dragId, setDragId] = useState(null);
 
   useEffect(() => {
     if (!localStorage.getItem("nb_model") && defaultModel) setModelName(defaultModel);
@@ -120,6 +121,19 @@ const GenerateForm = forwardRef(function GenerateForm({
     setMode("image-to-image");
   }
 
+  function reorderRefs(fromId, toId) {
+    if (!fromId || !toId || fromId === toId) return;
+    setRefs((prev) => {
+      const next = [...prev];
+      const from = next.findIndex((item) => item.id === fromId);
+      const to = next.findIndex((item) => item.id === toId);
+      if (from < 0 || to < 0) return prev;
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }
+
   async function pasteRefs() {
     try {
       if (navigator.clipboard?.read) {
@@ -167,7 +181,7 @@ const GenerateForm = forwardRef(function GenerateForm({
   }
 
   return (
-    <div className="card shadow">
+    <div className="card shadow generate-form-card" id="generate-form">
       <div className="card-header">
         <h5 className="mb-0">Генерация изображения</h5>
       </div>
@@ -265,31 +279,58 @@ const GenerateForm = forwardRef(function GenerateForm({
           </div>
           {needsRefs && (
             <div
-              className="mb-3 reference-drop-zone"
+              className={`mb-3 reference-drop-zone ${dragId ? "is-reordering" : ""}`}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                addFiles(e.dataTransfer.files);
+                if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
               }}
               onPaste={(e) => {
                 const files = [...(e.clipboardData?.files || [])];
                 if (files.length) addFiles(files);
               }}
             >
-              <p className="mb-2">Перетащите до 4 референсов, выберите файлы или вставьте из буфера</p>
+              <p className="mb-2">Перетащите до 4 референсов, выберите файлы или вставьте из буфера. Можно менять местами.</p>
               <div className="d-flex gap-2 flex-wrap">
-                <input type="file" accept="image/*" multiple onChange={(e) => addFiles(e.target.files)} />
+                <input className="form-control form-control-sm" type="file" accept="image/*" multiple onChange={(e) => addFiles(e.target.files)} />
                 <button type="button" className="btn btn-sm btn-outline-secondary" onClick={pasteRefs}>
                   Вставить из буфера
                 </button>
               </div>
-              <div className="d-flex flex-wrap gap-2 mt-2">
-                {refs.map((r) => (
-                  <div key={r.id} className="position-relative reference-item">
-                    <img src={r.dataUrl} alt="" style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 8 }} />
+              <div className="d-flex flex-wrap gap-2 mt-3">
+                {refs.map((r, idx) => (
+                  <div
+                    key={r.id}
+                    className={`reference-item ${dragId === r.id ? "dragging" : ""}`}
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", r.id);
+                      setDragId(r.id);
+                    }}
+                    onDragEnd={() => setDragId(null)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (e.dataTransfer.files?.length) {
+                        addFiles(e.dataTransfer.files);
+                        return;
+                      }
+                      reorderRefs(e.dataTransfer.getData("text/plain") || dragId, r.id);
+                      setDragId(null);
+                    }}
+                  >
+                    <img src={r.dataUrl} alt={`Реф ${idx + 1}`} draggable={false} />
+                    <span className="reference-label">Реф {idx + 1}</span>
                     <button
                       type="button"
-                      className="btn btn-sm btn-danger position-absolute top-0 end-0"
+                      className="reference-remove"
+                      title="Удалить референс"
+                      onMouseDown={(e) => e.stopPropagation()}
                       onClick={() => setRefs(refs.filter((x) => x.id !== r.id))}
                     >
                       ×
@@ -338,6 +379,7 @@ const GenerateForm = forwardRef(function GenerateForm({
                   className={`custom-dropdown-selected ${aspectOpen ? "active" : ""}`}
                   onClick={(e) => {
                     e.stopPropagation();
+                    setModelOpen(false);
                     setAspectOpen((v) => !v);
                   }}
                 >
@@ -385,7 +427,7 @@ const GenerateForm = forwardRef(function GenerateForm({
             <label className="form-label">Seed</label>
             <input className="form-control" type="number" value={seed} onChange={(e) => setSeed(e.target.value)} placeholder="пусто = случайный" />
           </div>
-          <button className="btn btn-primary w-100" disabled={busy}>
+          <button id="sendToGenerate" className="btn btn-primary w-100" disabled={busy}>
             {busy ? "Отправка…" : "Сгенерировать"}
           </button>
         </form>

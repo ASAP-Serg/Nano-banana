@@ -168,7 +168,7 @@ body {
 
 #sendToGenerate:hover {
     transform: translateY(-1px);
-    box-shadow: 0 10px 28px rgba(99, 102, 241, 0.28);
+    box-shadow: 0 0 0 1px rgba(216, 180, 254, 0.7), 0 0 28px rgba(168, 85, 247, 0.65);
     color: #fff;
 }
 
@@ -323,32 +323,67 @@ body {
 }
 
 /* Стили для референсных изображений */
+.reference-item {
+    position: relative;
+    width: 96px;
+    background: transparent !important;
+    cursor: grab;
+    user-select: none;
+}
+
+.reference-item.dragging {
+    opacity: 0.4;
+    cursor: grabbing;
+}
+
 .reference-item img {
-    width: 100px;
-    height: 100px;
+    width: 96px;
+    height: 96px;
     object-fit: cover;
-    border-radius: 8px;
+    border-radius: 10px;
     display: block;
     background-color: transparent !important;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-drag: none;
 }
 
-.reference-item {
-    background-color: transparent !important;
+.reference-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 0.4rem 0.2rem 0.2rem;
+    border-radius: 0 0 10px 10px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.78));
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-align: center;
+    pointer-events: none;
 }
 
-/* Убираем серый фон у контейнеров референсов */
-#referencePreview .reference-item,
-.reference-drop-zone-content .reference-item,
-.reference-item {
-    background-color: transparent !important;
-    background: transparent !important;
+.reference-remove {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
 }
 
-/* Убираем серый фон у изображений в референсах */
-.reference-item .img-thumbnail,
-.reference-item img {
-    background-color: transparent !important;
-    background: transparent !important;
+.reference-remove:hover {
+    background: #e11d48;
 }
 
 .nb-workspace {
@@ -362,6 +397,15 @@ body {
 .nb-workspace-form,
 .nb-workspace-gallery {
     min-width: 0;
+}
+
+.generate-form-card {
+    overflow: visible;
+    scroll-margin-top: 1rem;
+}
+
+.nb-modal {
+    z-index: 2000 !important;
 }
 
 @media (max-width: 991.98px) {
@@ -388,7 +432,7 @@ body {
     position: relative;
     width: 100%;
     overflow: visible; /* Разрешаем видимость скроллбара */
-    z-index: 1000; /* Убеждаемся что dropdown выше других элементов */
+    z-index: 20;
 }
 
 .custom-dropdown-selected {
@@ -410,15 +454,15 @@ body {
 }
 
 .custom-dropdown-selected.active {
-    border-color: var(--ring);
-    box-shadow: 0 0 0 3px var(--ring);
+    border-color: #c084fc;
+    box-shadow: 0 0 0 3px var(--ring), 0 0 16px rgba(168, 85, 247, 0.45);
     background-color: var(--accent);
 }
 
 .custom-dropdown-icon {
-    width: 36px;
-    height: 36px;
-    margin-right: 12px;
+    width: 28px;
+    height: 28px;
+    margin-right: 8px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -426,8 +470,10 @@ body {
 }
 
 .custom-dropdown-icon img {
-    width: 100%;
-    height: 100%;
+    max-width: 24px;
+    max-height: 20px;
+    width: auto;
+    height: auto;
     object-fit: contain;
 }
 
@@ -459,8 +505,8 @@ body {
     color: var(--popover-foreground);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
-    z-index: 1000;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18), 0 0 18px rgba(168, 85, 247, 0.18);
+    z-index: 30;
     max-height: 250px;
     overflow-y: auto;
     overflow-x: hidden;
@@ -587,14 +633,22 @@ body {
 }
 
 .custom-dropdown-item-icon {
-    width: 63px; /* Уменьшено на 10% (70 * 0.9 = 63) */
-    height: 63px; /* Уменьшено на 10% (70 * 0.9 = 63) */
-    margin-right: 12px;
+    width: 32px;
+    height: 24px;
+    margin-right: 8px;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.custom-dropdown-item-icon img {
+    max-width: 32px;
+    max-height: 22px;
+    width: auto;
+    height: auto;
     object-fit: contain;
     display: block;
-    min-width: 63px; /* Минимальная ширина для предотвращения сжатия */
-    min-height: 63px; /* Минимальная высота для предотвращения сжатия */
 }
 
 /* Улучшенные стили для референсных изображений */
@@ -637,8 +691,7 @@ body {
 }
 
 .reference-item:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px var(--shadow);
+    box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.7), 0 0 16px rgba(99, 102, 241, 0.45);
 }
 
 /* Стили для форм в темной/светлой теме */
@@ -652,9 +705,9 @@ body {
 
 .form-control:focus, .form-select:focus {
     background-color: var(--card);
-    border-color: var(--ring);
+    border-color: #c084fc;
     color: var(--foreground);
-    box-shadow: 0 0 0 3px var(--ring);
+    box-shadow: 0 0 0 3px var(--ring), 0 0 16px rgba(168, 85, 247, 0.4);
 }
 
 .form-control::placeholder {
@@ -763,8 +816,9 @@ body {
 /* Стили для модальных окон */
 .modal-content {
     background-color: var(--bg-primary) !important;
-    border: 2px solid var(--border-color) !important;
+    border: 1px solid rgba(168, 85, 247, 0.45) !important;
     color: var(--text-primary) !important;
+    box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.25), 0 0 40px rgba(168, 85, 247, 0.28);
 }
 
 .modal-header {
@@ -1005,6 +1059,7 @@ button.info-btn:hover,
 .gallery-card-wrap:hover {
     transform: scale(1.07);
     z-index: 5;
+    box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.7), 0 0 28px rgba(99, 102, 241, 0.55);
 }
 
 .gallery-card-wrap > .card,
@@ -1388,8 +1443,9 @@ button.info-btn:hover,
 
 .reference-drop-zone:hover,
 .reference-drop-zone.drag-over {
-    border-color: var(--ring);
+    border-color: #c084fc;
     background: var(--accent);
+    box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.45), 0 0 22px rgba(99, 102, 241, 0.35);
 }
 
 .reference-drop-icon {

@@ -177,6 +177,7 @@ export default function App() {
     try {
       const gen = await api.adminGeneration(id);
       generateRef.current?.applyGeneration(gen);
+      document.getElementById("generate-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
       toast(err.message, "error");
     }
