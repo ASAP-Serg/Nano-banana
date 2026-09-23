@@ -266,10 +266,20 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertIn("403", msg)
 
     def test_moonez_html_page_403(self):
-        html = "<html><head><title>403 Forbidden</title></head><body>nginx</body></html>"
+        html = "<html><head><title>403 Forbidden</title></head><body>cloudflare</body></html>"
         msg = humanize_api_error(html, 403, provider="bananalab")
         self.assertIn("moonez", msg.lower())
         self.assertNotIn("<html", msg.lower())
+
+    def test_storage_nginx_403_not_moonez(self):
+        html = (
+            "<html><head><title>403 Forbidden</title></head>"
+            "<body><center><h1>403 Forbidden</h1></center>"
+            "<hr><center>nginx/1.24.0 (Ubuntu)</center></body></html>"
+        )
+        msg = humanize_api_error(html, 403, provider="bananalab")
+        self.assertIn("хранилищ", msg.lower())
+        self.assertNotIn("whitelist", msg.lower())
 
     def test_model_paused_humanized(self):
         msg = humanize_api_error({"detail": "Model is paused due to high load"})

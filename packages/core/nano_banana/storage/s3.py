@@ -11,7 +11,7 @@ from typing import Dict, Optional
 from urllib.parse import urlparse
 
 from minio import Minio
-from minio.error import S3Error
+from minio.error import InvalidResponseError, S3Error
 
 from nano_banana.config import settings
 
@@ -25,6 +25,7 @@ class MinioService:
             access_key=settings.MINIO_ACCESS_KEY,
             secret_key=settings.MINIO_SECRET_KEY,
             secure=settings.MINIO_SECURE,
+            region="us-east-1",
         )
         self.bucket = settings.MINIO_BUCKET
         self.public_url = settings.MINIO_PUBLIC_URL
@@ -40,6 +41,7 @@ class MinioService:
                 access_key=settings.MINIO_ACCESS_KEY,
                 secret_key=settings.MINIO_SECRET_KEY,
                 secure=(public.scheme == "https"),
+                region="us-east-1",
             )
         return self.client
 
@@ -88,9 +90,9 @@ class MinioService:
                 base_url = self.public_url.rstrip("/")
                 return {"url": f"{base_url}/{self.bucket}/{filename}", "path": filename}
             return {"url": self.get_image_url(filename), "path": filename}
-        except S3Error as exc:
+        except (S3Error, InvalidResponseError, FileNotFoundError, ValueError) as exc:
             logger.error("[S3] upload failed: %s", exc, exc_info=True)
-            raise ValueError(f"S3 upload error: {exc}") from exc
+            raise ValueError("S3 upload error") from exc
 
     def get_image_url(self, filename: str, expires: Optional[int] = None) -> str:
         try:
@@ -101,7 +103,7 @@ class MinioService:
                 expires=timedelta(seconds=ttl),
                 response_headers={"response-cache-control": "private, no-store"},
             )
-        except S3Error as exc:
+        except (S3Error, InvalidResponseError) as exc:
             raise FileNotFoundError(f"Image {filename} not found") from exc
 
     def refresh_access_url(self, url_or_path: Optional[str]) -> Optional[str]:

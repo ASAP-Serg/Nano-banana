@@ -277,7 +277,12 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                     runtime.mark_success()
                 if generation.generation_metadata and generation.generation_metadata.get("paused_request_data"):
                     generation.generation_metadata.pop("paused_request_data", None)
-                upload_result = persist_generation_result(get_storage(), result)
+                try:
+                    upload_result = persist_generation_result(get_storage(), result)
+                except Exception:
+                    logger.exception("[GENERATION] persist failed gen=%s", generation_id)
+                    _fail(generation, session, "Не удалось сохранить изображение в хранилище.")
+                    return
                 if not upload_result:
                     _fail(
                         generation,

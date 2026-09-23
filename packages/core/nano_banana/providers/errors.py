@@ -336,6 +336,8 @@ def humanize_api_error(
         return "Неизвестная ошибка API"
 
     if _looks_like_html(text):
+        if "nginx" in text.lower():
+            return "Не удалось сохранить файл в хранилище (403). Повторите генерацию."
         cf_code = _extract_cloudflare_error_code(text)
         if cf_code and cf_code in _CLOUDFLARE_GATEWAY_MESSAGES:
             return _CLOUDFLARE_GATEWAY_MESSAGES[cf_code]
@@ -376,6 +378,8 @@ def humanize_api_error(
         return f"{CONTENT_POLICY_USER_MESSAGE} ({detail})"
 
     if http_status == 403 or "403 forbidden" in text.lower() or text.strip().lower() == "forbidden":
+        if "nginx" in text.lower():
+            return "Не удалось сохранить файл в хранилище (403). Повторите генерацию."
         if provider == "bananalab":
             return (
                 "Moonez отклонил запрос (403). Чаще всего это IP whitelist: "
