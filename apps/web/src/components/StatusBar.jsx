@@ -1,3 +1,5 @@
+import { ServiceIcon } from "../icons.jsx";
+
 export default function StatusBar({ status }) {
   const services = status?.services || [];
   return (
@@ -5,10 +7,13 @@ export default function StatusBar({ status }) {
       <div className="container-fluid px-3 px-lg-4">
         <div className="service-status-bar__inner">
           <div className="service-status-bar__head">
-            <div>
-              <div className="service-status-bar__title">Статус сервисов</div>
-              <div className="service-status-bar__subtitle">
-                {status?.message || "Проверяем Moonez и Google Gemini…"}
+            <div className="service-status-bar__title-wrap">
+              <span className="service-status-bar__pulse" aria-hidden="true" />
+              <div>
+                <div className="service-status-bar__title">Статус сервисов</div>
+                <div className="service-status-bar__subtitle">
+                  {status?.message || "Проверяем Moonez и Google Gemini…"}
+                </div>
               </div>
             </div>
             <a
@@ -23,6 +28,7 @@ export default function StatusBar({ status }) {
           <div className={`service-status-bar__grid ${services.length >= 3 ? "service-status-bar__grid--triple" : ""}`}>
             {services.map((svc) => (
               <article key={svc.id} className={`service-status-card service-status-card--${svc.state || "unknown"}`}>
+                <ServiceIcon id={svc.id} />
                 <div className="service-status-card__body">
                   <div className="service-status-card__row">
                     <h3 className="service-status-card__name">{svc.short_name || svc.name}</h3>

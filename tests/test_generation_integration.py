@@ -104,6 +104,8 @@ class TestSecurityHelpers(unittest.TestCase):
             MINIO_PUBLIC_URL="https://storage.example.com",
             MINIO_BUCKET="nano-banana-images",
             API_URL="https://app.example.com",
+            DATA_ENCRYPTION_KEY="y" * 64,
+            REDIS_PASSWORD="test-redis-password-not-weak-xx",
         )
         ok = "https://storage.example.com/nano-banana-images/images/references/abc.jpg"
         legacy = "https://storage.example.com/nano-banana-images/images/references/ref_20260101_120000_abcd.jpg"
@@ -253,6 +255,21 @@ class TestHumanizeApiError(unittest.TestCase):
     def test_json_detail_unchanged(self):
         msg = humanize_api_error({"detail": "Invalid API key"})
         self.assertEqual(msg, "Invalid API key")
+
+    def test_moonez_html_403_title(self):
+        msg = humanize_api_error("Ошибка провайдера: 403 Forbidden", provider="bananalab")
+        self.assertIn("ключ", msg.lower())
+        self.assertIn("moonez", msg.lower())
+
+    def test_moonez_http_403(self):
+        msg = humanize_api_error("Forbidden", 403, provider="bananalab")
+        self.assertIn("403", msg)
+
+    def test_moonez_html_page_403(self):
+        html = "<html><head><title>403 Forbidden</title></head><body>nginx</body></html>"
+        msg = humanize_api_error(html, 403, provider="bananalab")
+        self.assertIn("moonez", msg.lower())
+        self.assertNotIn("<html", msg.lower())
 
     def test_model_paused_humanized(self):
         msg = humanize_api_error({"detail": "Model is paused due to high load"})

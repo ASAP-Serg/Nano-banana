@@ -28,7 +28,7 @@ class MinioService:
         )
         self.bucket = settings.MINIO_BUCKET
         self.public_url = settings.MINIO_PUBLIC_URL
-        self.presign_expires = max(60, int(settings.MINIO_PRESIGN_EXPIRES_SECONDS))
+        self.presign_expires = settings.presign_ttl_seconds
         self._presign_client = self._build_presign_client()
         self._ensure_bucket_exists()
 
@@ -99,6 +99,7 @@ class MinioService:
                 self.bucket,
                 filename,
                 expires=timedelta(seconds=ttl),
+                response_headers={"response-cache-control": "private, no-store"},
             )
         except S3Error as exc:
             raise FileNotFoundError(f"Image {filename} not found") from exc

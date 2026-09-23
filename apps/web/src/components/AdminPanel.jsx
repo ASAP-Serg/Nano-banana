@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import { toast } from "../toast.js";
+import { IconToForm } from "../icons.jsx";
 
 export default function AdminPanel({ onClose, onInsertToForm }) {
   const [users, setUsers] = useState([]);
@@ -236,7 +237,8 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                         {g.username} · {g.status} · {g.model_name}
                       </div>
                       <div className="text-muted">{g.prompt}</div>
-                      <button type="button" className="btn btn-sm btn-outline-primary mt-2" onClick={() => onInsertToForm(g.id)}>
+                      <button type="button" className="btn btn-sm btn-outline-primary mt-2 d-inline-flex align-items-center gap-2" onClick={() => onInsertToForm(g.id)}>
+                        <IconToForm />
                         В форму
                       </button>
                     </div>

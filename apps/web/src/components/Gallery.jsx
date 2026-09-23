@@ -1,4 +1,5 @@
 import { downloadImage, PROVIDER_BADGE, toast } from "../toast.js";
+import { IconButton, IconDownload, IconInfo, IconRefresh, IconToForm, IconTrash } from "../icons.jsx";
 
 function statusLabel(item) {
   if (item.status === "pending" || item.status === "running") return "в очереди / идёт";
@@ -38,9 +39,9 @@ export default function Gallery({
             </small>
           )}
         </div>
-        <button className="btn btn-sm btn-light" onClick={onRefresh}>
-          Обновить
-        </button>
+        <IconButton className="btn btn-sm btn-light btn-icon-only" title="Обновить" onClick={onRefresh}>
+          <IconRefresh />
+        </IconButton>
       </div>
       <div className="card-body">
         <div id="imageGrid" className="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
@@ -75,24 +76,28 @@ export default function Gallery({
                   {item.error_message && <div className="small text-danger mt-1">{item.error_message}</div>}
                   <div className="d-flex flex-wrap gap-1 mt-2">
                     {item.result_url && (
-                      <button
-                        type="button"
+                      <IconButton
                         className="btn btn-icon-only btn-download btn-sm"
+                        title="Скачать"
                         onClick={() => downloadImage(item.result_url, item.prompt)}
                       >
-                        Скачать
-                      </button>
+                        <IconDownload />
+                      </IconButton>
                     )}
-                    <button type="button" className="btn btn-icon-only btn-edit btn-sm" onClick={() => onInfo(item)}>
-                      Инфо
-                    </button>
-                    <button
-                      type="button"
+                    <IconButton
                       className="btn btn-icon-only btn-edit btn-sm"
+                      title="Инфо"
+                      onClick={() => onInfo(item)}
+                    >
+                      <IconInfo />
+                    </IconButton>
+                    <IconButton
+                      className="btn btn-icon-only btn-edit btn-sm"
+                      title="В форму"
                       onClick={() => onReuse(item.id)}
                     >
-                      В форму
-                    </button>
+                      <IconToForm />
+                    </IconButton>
                     {item.status === "failed" && item.fallback_model && (
                       <button
                         type="button"
@@ -102,9 +107,9 @@ export default function Gallery({
                         Retry {item.fallback_model}
                       </button>
                     )}
-                    <button
-                      type="button"
+                    <IconButton
                       className="btn btn-icon-only btn-delete btn-sm"
+                      title="Удалить"
                       onClick={async () => {
                         try {
                           await onDelete(item.id);
@@ -113,8 +118,8 @@ export default function Gallery({
                         }
                       }}
                     >
-                      Удалить
-                    </button>
+                      <IconTrash />
+                    </IconButton>
                   </div>
                 </div>
               </div>

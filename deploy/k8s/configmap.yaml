@@ -8,7 +8,6 @@ data:
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "nano_banana"
   POSTGRES_USER: "nano_banana_user"
-  REDIS_URL: "redis://redis.example.internal:6379/0"
   MINIO_ENDPOINT: "storage.yandexcloud.net"
   MINIO_BUCKET: "nano-banana-images"
   MINIO_SECURE: "true"

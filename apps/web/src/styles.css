@@ -995,8 +995,25 @@ button.info-btn:hover,
 
 /* Стили для кнопок-иконок */
 .btn-icon-only {
+    width: 2.25rem;
+    height: 2.25rem;
+    min-width: 2.25rem !important;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    flex: 0 0 auto;
+    font-size: 0;
+    line-height: 1;
     transition: all 0.2s;
     cursor: pointer;
+}
+
+.btn-icon-only svg {
+    width: 1rem;
+    height: 1rem;
+    display: block;
 }
 
 .btn-icon-only:hover {

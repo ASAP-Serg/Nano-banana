@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { downloadImage } from "../toast.js";
+import { IconDownload } from "../icons.jsx";
 
 export default function Lightbox({ items, index, onClose, onIndex }) {
   const item = items[index];
@@ -65,7 +66,8 @@ export default function Lightbox({ items, index, onClose, onIndex }) {
         <div className="text-light text-center mt-1" style={{ fontSize: "0.85rem", opacity: 0.7 }}>
           {index + 1} / {items.length}
         </div>
-        <button type="button" className="btn btn-sm btn-success mt-3" onClick={() => downloadImage(item.result_url, item.prompt)}>
+        <button type="button" className="btn btn-sm btn-success mt-3 d-inline-flex align-items-center gap-2" onClick={() => downloadImage(item.result_url, item.prompt)}>
+          <IconDownload />
           Скачать
         </button>
       </div>

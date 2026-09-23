@@ -30,7 +30,7 @@ class JobQueue:
     def __init__(self, url: Optional[str] = None):
         # socket_timeout > brpop timeout, иначе redis-py кидает TimeoutError вместо None
         self.client = redis.Redis.from_url(
-            url or settings.REDIS_URL,
+            url or settings.redis_url,
             decode_responses=True,
             socket_connect_timeout=5,
             socket_timeout=30,

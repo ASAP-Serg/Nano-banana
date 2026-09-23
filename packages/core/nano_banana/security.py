@@ -1,6 +1,7 @@
 """Общие проверки безопасности для Nano-Banana."""
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import socket
 import uuid
@@ -168,3 +169,15 @@ def is_safe_outbound_image_url(url: str, settings: "Settings") -> bool:
 def assert_safe_outbound_image_url(url: str, settings: "Settings") -> None:
     if not is_safe_outbound_image_url(url, settings):
         raise ValueError("Outbound image URL blocked by SSRF policy")
+
+
+def constant_time_secret_equal(expected: str, provided: Optional[str]) -> bool:
+    """Compare secrets without leaking the expected value via early-return on mismatch."""
+    want = (expected or "").strip().encode("utf-8")
+    if not want:
+        return False
+    got = (provided or "").strip().encode("utf-8")
+    if len(got) != len(want):
+        hmac.compare_digest(want, want)
+        return False
+    return hmac.compare_digest(want, got)

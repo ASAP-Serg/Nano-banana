@@ -11,6 +11,7 @@ from nano_banana.db.models import User
 from nano_banana.db.session import db_service
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import UserCreateRequest, UserLoginRequest, UserResponse
+from nano_banana.security import constant_time_secret_equal
 from nano_banana.tokens import Token, TokenPayload
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -43,10 +44,7 @@ def _clear_access_cookie(response: Response) -> None:
 
 
 def _bootstrap_secret_ok(header_secret: Optional[str]) -> bool:
-    expected = (settings.ADMIN_BOOTSTRAP_SECRET or "").strip()
-    if not expected or not header_secret:
-        return False
-    return header_secret.strip() == expected
+    return constant_time_secret_equal(settings.ADMIN_BOOTSTRAP_SECRET, header_secret)
 
 
 @router.post("/register", response_model=Token)

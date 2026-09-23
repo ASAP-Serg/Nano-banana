@@ -344,6 +344,9 @@ def humanize_api_error(
             title = title_match.group(1).strip()
             if "|" in title:
                 title = title.split("|", 1)[1].strip()
+            title_l = title.lower()
+            if http_status == 403 or "403" in title_l or title_l == "forbidden":
+                return humanize_api_error(title, http_status or 403, provider=provider)
             return f"Ошибка провайдера: {title}"
         if http_status and str(http_status) in _CLOUDFLARE_GATEWAY_MESSAGES:
             return _CLOUDFLARE_GATEWAY_MESSAGES[str(http_status)]
@@ -371,6 +374,21 @@ def humanize_api_error(
             return policy_msg
         detail = text if len(text) < 180 else text[:180] + "…"
         return f"{CONTENT_POLICY_USER_MESSAGE} ({detail})"
+
+    if http_status == 403 or "403 forbidden" in text.lower() or text.strip().lower() == "forbidden":
+        if provider == "bananalab":
+            return (
+                "Moonez отклонил запрос (403). Обычно это ключ bh_, баланс или доступ к модели. "
+                "Пересохраните ключ в настройках, проверьте кабинет Moonez или попробуйте Replicate (r8_)."
+            )
+        if provider == "openrouter":
+            return OPENROUTER_ACCOUNT_GUARD_MESSAGE
+        if provider == "replicate":
+            return (
+                "Replicate отклонил ключ или доступ к модели (403). "
+                "Проверьте r8_ ключ на replicate.com/account/api-tokens."
+            )
+        return "Провайдер отклонил доступ (403). Проверьте API-ключ в настройках."
 
     status_key = str(http_status) if http_status else None
     if status_key in _CLOUDFLARE_GATEWAY_MESSAGES and http_status and http_status >= 500:

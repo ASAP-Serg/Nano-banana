@@ -31,7 +31,7 @@ spec:
               command:
                 - python
                 - -c
-                - import os, redis; redis.from_url(os.environ["REDIS_URL"]).ping()
+                - import redis; from nano_banana.config import settings; redis.from_url(settings.redis_url).ping()
             initialDelaySeconds: 15
             periodSeconds: 30
           resources:

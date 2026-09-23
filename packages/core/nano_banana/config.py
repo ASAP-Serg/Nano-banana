@@ -1,4 +1,6 @@
 """Конфигурация приложения."""
+from urllib.parse import quote, urlparse, urlunparse
+
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,7 +20,31 @@ _WEAK_PASSWORDS = {
     "minioadmin123",
     "minioadmin",
     "change-me",
+    "redis",
+    "local-dev-redis-password",
 }
+
+_DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+_PROD_PRESIGN_MAX_SECONDS = 300
+
+
+def apply_redis_password(url: str, password: str) -> str:
+    """Insert REDIS_PASSWORD into redis:// URL when the URL has no password yet."""
+    raw = (url or "redis://localhost:6379/0").strip()
+    pw = (password or "").strip()
+    parsed = urlparse(raw)
+    if parsed.password or not pw:
+        return raw
+    username = parsed.username or ""
+    creds = f"{username}:{quote(pw, safe='')}" if username else f":{quote(pw, safe='')}"
+    host = parsed.hostname or "localhost"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = f":{parsed.port}" if parsed.port else ""
+    netloc = f"{creds}@{host}{port}"
+    return urlunparse(
+        (parsed.scheme or "redis", netloc, parsed.path or "/0", "", parsed.query, parsed.fragment)
+    )
 
 
 class Settings(BaseSettings):
@@ -30,7 +56,7 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET: str = "nano-banana-images"
     MINIO_PUBLIC_URL: str = "http://localhost:9000"
-    MINIO_PRESIGN_EXPIRES_SECONDS: int = 900
+    MINIO_PRESIGN_EXPIRES_SECONDS: int = 180
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
@@ -48,6 +74,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     DATA_ENCRYPTION_KEY: str = ""
     REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_PASSWORD: str = ""
     # Beget: false + presigned URLs. Local MinIO can set true for convenience.
     S3_PUBLIC_READ: bool = False
     WORKER_ID: str = ""
@@ -115,6 +142,23 @@ class Settings(BaseSettings):
     SECURITY_REGISTER_WINDOW_SECONDS: int = 3600
     SECURITY_ALLOWED_REF_URL_HOSTS: str = ""
     SECURITY_ALLOWED_OUTBOUND_IMAGE_HOSTS: str = ""
+    SECURITY_TRUSTED_PROXY_CIDRS: str = _DEFAULT_TRUSTED_PROXY_CIDRS
+
+    @property
+    def redis_url(self) -> str:
+        return apply_redis_password(self.REDIS_URL, self.REDIS_PASSWORD)
+
+    @property
+    def is_production(self) -> bool:
+        api_lower = (self.API_URL or "").lower()
+        return api_lower.startswith("https://") and "localhost" not in api_lower
+
+    @property
+    def presign_ttl_seconds(self) -> int:
+        ttl = max(60, int(self.MINIO_PRESIGN_EXPIRES_SECONDS))
+        if self.is_production:
+            return min(ttl, _PROD_PRESIGN_MAX_SECONDS)
+        return ttl
 
     @model_validator(mode="after")
     def _reject_weak_secrets(self):
@@ -130,12 +174,18 @@ class Settings(BaseSettings):
         api_lower = (self.API_URL or "").lower()
         if self.S3_PUBLIC_READ and api_lower.startswith("https://") and "localhost" not in api_lower:
             raise ValueError("S3_PUBLIC_READ=true запрещён в production (API_URL=https)")
-        if api_lower.startswith("https://") and "localhost" not in api_lower:
+        if self.is_production:
             dek = (self.DATA_ENCRYPTION_KEY or "").strip()
             if len(dek) < 32 or dek == (self.SECRET_KEY or "").strip():
                 raise ValueError(
                     "DATA_ENCRYPTION_KEY must be set in production (>=32 chars, distinct from SECRET_KEY)"
                 )
+            parsed_redis = urlparse(self.REDIS_URL)
+            redis_pw = (self.REDIS_PASSWORD or "").strip() or (parsed_redis.password or "")
+            if not redis_pw:
+                raise ValueError("REDIS_PASSWORD or password in REDIS_URL is required in production")
+            if redis_pw.lower() in _WEAK_PASSWORDS:
+                raise ValueError("REDIS_PASSWORD is weak — set a strong password in .env")
         return self
 
 

@@ -27,6 +27,20 @@ jobs:
             git fetch origin master
             git reset --hard "${{ github.sha }}"
 
+            if [ ! -f .env ]; then
+              echo "ERROR: .env is missing"
+              exit 1
+            fi
+            if ! grep -qE '^REDIS_PASSWORD=.+' .env; then
+              pw="$(openssl rand -hex 24)"
+              if grep -qE '^REDIS_PASSWORD=' .env; then
+                sed -i "s/^REDIS_PASSWORD=.*/REDIS_PASSWORD=${pw}/" .env
+              else
+                printf '\nREDIS_PASSWORD=%s\n' "$pw" >> .env
+              fi
+              echo "Generated REDIS_PASSWORD in .env (required for Redis AUTH)"
+            fi
+
             if docker compose version >/dev/null 2>&1; then
               DC="docker compose"
             else
