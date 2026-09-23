@@ -52,6 +52,11 @@ jobs:
             sleep 20
             $DC ps
 
+            if [ -f deploy/nginx/storage.ooneclickk.ru.conf ]; then
+              cp deploy/nginx/storage.ooneclickk.ru.conf /etc/nginx/sites-available/storage.ooneclickk.ru
+              nginx -t
+            fi
+
             missing=0
             for name in nano_banana_api nano_banana_worker nano_banana_web nano_banana_redis; do
               if ! docker ps --format '{{.Names}}' | grep -qx "$name"; then

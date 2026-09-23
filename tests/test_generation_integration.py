@@ -45,6 +45,15 @@ class TestImageModels(unittest.TestCase):
         self.assertIsNone(get_provider_for_model("nano-banana-pro", {"replicate": "r8_x", "bananalab": "", "openrouter": ""}))
         self.assertIsNone(get_provider_for_model("nano-banana-pro-r8", {"replicate": "", "bananalab": "nb_x", "openrouter": ""}))
 
+    def test_only_moonez_models_when_only_bh_key(self):
+        from nano_banana.providers.models import models_available_with_keys
+
+        keys = {"replicate": "", "bananalab": "bh_x", "openrouter": ""}
+        self.assertEqual(
+            list(models_available_with_keys(keys)),
+            ["nano-banana-2", "nano-banana", "nano-banana-pro"],
+        )
+
 
 class TestPromptSanitize(unittest.TestCase):
     def test_batman_ru(self):

@@ -16,7 +16,7 @@ from nano_banana.generation.cleanup import cleanup_old_generations
 from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
 from nano_banana.generation.processor import MAX_GENERATION_RETRIES, get_fallback_model, rewrite_metadata_fields
 from nano_banana.generation.references import store_reference_images
-from nano_banana.providers.models import DEFAULT_MODEL_ID, MODEL_REGISTRY, get_provider_for_model
+from nano_banana.providers.models import DEFAULT_MODEL_ID, get_provider_for_model, models_available_with_keys
 from nano_banana.queue.jobs import get_job_queue
 from nano_banana.schemas import ImageGenerationRequest, ImageGenerationResponse, ImageResponse
 from nano_banana.status.services import build_provider_status, build_public_service_status
@@ -203,9 +203,9 @@ async def list_generations(
 
 @router.get("/models")
 async def get_available_models(user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]):
-    _ = user
+    keys = load_user_api_keys(user.user_id)
     models = {}
-    for key, entry in MODEL_REGISTRY.items():
+    for key, entry in models_available_with_keys(keys).items():
         models[key] = {
             "display_name": entry["display_name"],
             "description": entry["description"],
@@ -215,9 +215,10 @@ async def get_available_models(user: Annotated[TokenPayload, Depends(auth_servic
             "params_profile": entry.get("params_profile", "nano"),
             "group": entry.get("group") or entry.get("color", "replicate"),
         }
+    default_model = DEFAULT_MODEL_ID if DEFAULT_MODEL_ID in models else next(iter(models), DEFAULT_MODEL_ID)
     return {
         "models": models,
-        "default_model": DEFAULT_MODEL_ID,
+        "default_model": default_model,
         "bananalab_key_prefix": "bh_",
         "bananalab_key_prefix_legacy": "nb_",
         "replicate_key_prefix_hint": "r8_",

@@ -29,6 +29,14 @@ const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultMod
   }, [defaultModel]);
 
   useEffect(() => {
+    if (!models || Object.keys(models).length === 0) return;
+    if (models[modelName]) return;
+    const fallback = models[defaultModel] ? defaultModel : Object.keys(models)[0];
+    setModelName(fallback);
+    localStorage.setItem("nb_model", fallback);
+  }, [models, modelName, defaultModel]);
+
+  useEffect(() => {
     if (!aspectOpen) return undefined;
     const close = () => setAspectOpen(false);
     window.addEventListener("click", close);
@@ -165,9 +173,9 @@ const GenerateForm = forwardRef(function GenerateForm({ user, models, defaultMod
             </select>
             <small className="text-muted d-block mt-1">{modelEntry.description}</small>
             <div className="model-provider-legend mt-2">
-              {Object.entries(GROUP_LABELS).map(([key, label]) => (
+              {Object.keys(grouped).map((key) => (
                 <span key={key} className={`model-legend-item model-legend-${key}`}>
-                  {label}
+                  {GROUP_LABELS[key] || key}
                 </span>
               ))}
             </div>

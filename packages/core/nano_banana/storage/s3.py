@@ -101,7 +101,6 @@ class MinioService:
                 self.bucket,
                 filename,
                 expires=timedelta(seconds=ttl),
-                response_headers={"response-cache-control": "private, no-store"},
             )
         except (S3Error, InvalidResponseError) as exc:
             raise FileNotFoundError(f"Image {filename} not found") from exc

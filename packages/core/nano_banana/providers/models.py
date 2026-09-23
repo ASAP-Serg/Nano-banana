@@ -188,6 +188,14 @@ def get_provider_for_model(model_id: Optional[str], keys: Dict[str, str]) -> Opt
     return None
 
 
+def models_available_with_keys(keys: Dict[str, str]) -> Dict[str, dict]:
+    return {
+        model_id: entry
+        for model_id, entry in MODEL_REGISTRY.items()
+        if get_provider_for_model(model_id, keys)
+    }
+
+
 def select_api_key_for_model(
     model_id: Optional[str],
     keys: Dict[str, str],
