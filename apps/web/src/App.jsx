@@ -222,8 +222,8 @@ export default function App() {
       />
       <StatusBar status={status} />
       <main className="container-fluid my-4">
-        <div className="row g-4 justify-content-center mt-3">
-          <div className="col-lg-4">
+        <div className="nb-workspace">
+          <div className="nb-workspace-form">
             <GenerateForm
               ref={generateRef}
               user={user}
@@ -236,7 +236,7 @@ export default function App() {
               onNeedKeys={() => setShowKeys(true)}
             />
           </div>
-          <div className="col-lg-8">
+          <div className="nb-workspace-gallery">
             <Gallery
               user={user}
               gallery={gallery}

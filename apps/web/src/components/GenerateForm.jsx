@@ -167,7 +167,7 @@ const GenerateForm = forwardRef(function GenerateForm({
   }
 
   return (
-    <div className="card shadow h-100">
+    <div className="card shadow">
       <div className="card-header">
         <h5 className="mb-0">Генерация изображения</h5>
       </div>

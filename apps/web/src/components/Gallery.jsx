@@ -29,7 +29,7 @@ export default function Gallery({
   onRetry,
 }) {
   return (
-    <div className="card shadow h-100">
+    <div className="card shadow">
       <div className="card-header d-flex justify-content-between align-items-start">
         <div>
           <h5 className="mb-0">Мои работы</h5>
@@ -44,28 +44,27 @@ export default function Gallery({
         </IconButton>
       </div>
       <div className="card-body">
-        <div id="imageGrid" className="row row-cols-1 row-cols-md-2 g-4">
+        <div id="imageGrid" className="media-grid">
           {gallery.map((item, idx) => (
-            <div className="col gallery-card-wrap" key={item.id}>
+            <div className="gallery-card-wrap" key={item.id}>
               <div className="card">
-                {item.result_url && isSafeMediaUrl(item.result_url) ? (
-                  <div className="image-container">
+                <div className="media-thumb">
+                  {item.result_url && isSafeMediaUrl(item.result_url) ? (
                     <img
                       src={item.result_url}
-                      className="card-img-top generation-image"
+                      className="generation-image"
                       alt=""
                       onClick={() => onOpen(idx)}
-                      style={{ cursor: "zoom-in" }}
                     />
-                  </div>
-                ) : (
-                  <div className="p-4 text-center text-muted">
-                    {item.status === "pending" || item.status === "running" ? (
-                      <div className="spinner-border" role="status" />
-                    ) : null}
-                    <div className="mt-2">{statusLabel(item)}</div>
-                  </div>
-                )}
+                  ) : (
+                    <div className="media-thumb-empty">
+                      {item.status === "pending" || item.status === "running" ? (
+                        <div className="spinner-border" role="status" />
+                      ) : null}
+                      <div className="mt-2">{statusLabel(item)}</div>
+                    </div>
+                  )}
+                </div>
                 <div className="card-body">
                   <p className="small mb-1 prompt-text">{item.prompt}</p>
                   <div className="small text-muted">
@@ -125,8 +124,8 @@ export default function Gallery({
               </div>
             </div>
           ))}
-          {user && gallery.length === 0 && <p className="text-muted px-3">Пока нет генераций.</p>}
-          {!user && <p className="text-muted px-3">Войдите, чтобы видеть галерею.</p>}
+          {user && gallery.length === 0 && <p className="text-muted media-grid-empty">Пока нет генераций.</p>}
+          {!user && <p className="text-muted media-grid-empty">Войдите, чтобы видеть галерею.</p>}
         </div>
       </div>
     </div>

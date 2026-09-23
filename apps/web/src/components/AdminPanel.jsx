@@ -231,11 +231,11 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                 </button>
               </div>
             </div>
-            <div className="row row-cols-1 row-cols-md-3 g-3">
+            <div className="media-grid">
               {gens.map((g) => (
-                <div className="col" key={g.id}>
+                <div key={g.id}>
                   <div className="card admin-gen-card">
-                    <div className="admin-gen-thumb">
+                    <div className="media-thumb">
                       {g.result_url && isSafeMediaUrl(g.result_url) ? (
                         <img
                           src={g.result_url}
@@ -247,7 +247,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                           }}
                         />
                       ) : (
-                        <div className="admin-gen-thumb-empty">{g.status || "нет фото"}</div>
+                        <div className="media-thumb-empty">{g.status || "нет фото"}</div>
                       )}
                     </div>
                     <div className="card-body small">
