@@ -122,3 +122,28 @@ class TestRateLimitFailClosed(unittest.TestCase):
             with self.assertRaises(HTTPException) as ctx:
                 check_rate_limit("login-ip", "1.2.3.4", 10, 300)
         self.assertEqual(ctx.exception.status_code, 503)
+
+
+class TestBolaGenerationOwnership(unittest.TestCase):
+    """BOLA: user A must not read/delete user B's generation by ID."""
+
+    def test_get_and_delete_require_owner_filter(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "images.py"
+        )
+        text = src.read_text(encoding="utf-8")
+        self.assertIn("async def get_generation_full", text)
+        self.assertIn("async def delete_generation", text)
+        # both owners lookups must bind generation to the caller
+        self.assertGreaterEqual(
+            text.count("Generation.user_id == user.user_id"),
+            2,
+            msg="get/delete must filter by owning user_id",
+        )
