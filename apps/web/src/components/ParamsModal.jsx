@@ -27,7 +27,7 @@ export default function ParamsModal({ item, onClose }) {
             <p className="mb-2">
               <strong>Исходный промпт:</strong>
             </p>
-            <p className="small mb-0" style={{ background: "rgba(102, 126, 234, 0.08)", padding: "0.75rem", borderRadius: 6 }}>
+            <p className="small mb-0" style={{ background: "rgba(10, 132, 255, 0.08)", padding: "0.75rem", borderRadius: 10 }}>
               {item.original_prompt}
             </p>
           </div>
