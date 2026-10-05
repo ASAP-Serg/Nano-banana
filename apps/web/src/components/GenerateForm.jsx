@@ -25,6 +25,28 @@ async function collectImageFiles(fileList) {
   return next;
 }
 
+/** Screenshots often land in clipboardData.items, not .files */
+function imageFilesFromClipboardEvent(e) {
+  const out = [];
+  const seen = new Set();
+  const items = e.clipboardData?.items;
+  if (items) {
+    for (const item of items) {
+      if (item.kind !== "file" || !item.type?.startsWith("image/")) continue;
+      const file = item.getAsFile();
+      if (!file || seen.has(file)) continue;
+      seen.add(file);
+      out.push(file);
+    }
+  }
+  if (!out.length && e.clipboardData?.files?.length) {
+    for (const file of e.clipboardData.files) {
+      if (file?.type?.startsWith("image/")) out.push(file);
+    }
+  }
+  return out;
+}
+
 const GenerateForm = forwardRef(function GenerateForm({
   user,
   models,
@@ -76,6 +98,23 @@ const GenerateForm = forwardRef(function GenerateForm({
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [aspectOpen, modelOpen]);
+
+  // Ctrl+V works even when focus is in prompt/negative fields
+  useEffect(() => {
+    const onPaste = (e) => {
+      const files = imageFilesFromClipboardEvent(e);
+      if (!files.length) return;
+      e.preventDefault();
+      void (async () => {
+        const extra = await collectImageFiles(files);
+        if (!extra.length) return;
+        setRefs((prev) => [...prev, ...extra].slice(0, 4));
+        setMode("image-to-image");
+      })();
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
 
   useImperativeHandle(ref, () => ({
     applyGeneration(gen, { modelOverride } = {}) {
@@ -280,14 +319,18 @@ const GenerateForm = forwardRef(function GenerateForm({
           {needsRefs && (
             <div
               className={`mb-3 reference-drop-zone ${dragId ? "is-reordering" : ""}`}
+              tabIndex={0}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
                 if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
               }}
               onPaste={(e) => {
-                const files = [...(e.clipboardData?.files || [])];
-                if (files.length) addFiles(files);
+                const files = imageFilesFromClipboardEvent(e);
+                if (!files.length) return;
+                e.preventDefault();
+                e.stopPropagation();
+                addFiles(files);
               }}
             >
               <p className="mb-2">Перетащите до 4 референсов, выберите файлы или вставьте из буфера. Можно менять местами.</p>

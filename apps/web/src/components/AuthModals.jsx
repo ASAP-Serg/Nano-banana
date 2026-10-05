@@ -41,11 +41,14 @@ export default function AuthModals({ showLogin, showRegister, onCloseLogin, onCl
             <input
               className="form-control mb-2"
               name="username"
-              placeholder="Имя пользователя"
+              placeholder="Имя: 3–32 символа, буквы и цифры"
               required
               minLength={3}
               maxLength={32}
               autoComplete="username"
+              autoCapitalize="none"
+              spellCheck={false}
+              title="3–32 символа, буквы и цифры, внутри можно . _ -"
             />
             <input className="form-control mb-2" name="email" type="email" placeholder="Email" required />
             <PasswordField name="password" placeholder="Пароль от 10 символов" minLength={10} />

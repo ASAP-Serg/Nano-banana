@@ -8,10 +8,10 @@ export default function Navbar({
   onLogout,
 }) {
   return (
-    <nav className="navbar navbar-expand-lg navbar-dark bg-dark">
+    <nav className="navbar navbar-expand-lg navbar-dark">
       <div className="container">
         <a className="navbar-brand" href="/">
-          🍌 Nano Banana
+          Nano Banana
         </a>
         <button className="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
           <span className="navbar-toggler-icon" />
