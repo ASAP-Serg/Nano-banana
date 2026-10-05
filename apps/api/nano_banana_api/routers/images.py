@@ -5,7 +5,7 @@ import logging
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm.attributes import flag_modified
 
 from nano_banana.auth import auth_service
@@ -18,8 +18,10 @@ from nano_banana.generation.processor import MAX_GENERATION_RETRIES, get_fallbac
 from nano_banana.generation.references import store_reference_images
 from nano_banana.providers.models import DEFAULT_MODEL_ID, MODEL_REGISTRY, get_provider_for_model, models_available_with_keys
 from nano_banana.queue.jobs import get_job_queue
+from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import ImageGenerationRequest, ImageGenerationResponse, ImageResponse
 from nano_banana.status.services import build_provider_status, build_public_service_status
+from nano_banana.storage.media import client_reference_urls, client_result_url
 from nano_banana.storage.s3 import MinioService
 from nano_banana.tokens import TokenPayload
 
@@ -35,13 +37,44 @@ def _storage() -> MinioService:
     return _minio
 
 
+def _queue_payload(body: ImageGenerationRequest, reference_image_urls: List[str]) -> dict:
+    return {
+        "prompt": body.prompt,
+        "negative_prompt": body.negative_prompt,
+        "generation_mode": body.generation_mode,
+        "resolution": body.resolution,
+        "aspect_ratio": body.aspect_ratio,
+        "guidance_scale": body.guidance_scale,
+        "num_inference_steps": body.num_inference_steps,
+        "seed": body.seed,
+        "model_name": body.model_name,
+        "rewrite_prompt": bool(body.rewrite_prompt),
+        "reference_images": reference_image_urls,
+    }
+
+
 @router.post("/generate", response_model=ImageGenerationResponse)
 async def generate_image(
-    request: ImageGenerationRequest,
+    http_request: Request,
+    body: ImageGenerationRequest,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
+    check_rate_limit(
+        "generate-user",
+        str(user.user_id),
+        settings.SECURITY_GENERATE_MAX_REQUESTS,
+        settings.SECURITY_GENERATE_WINDOW_SECONDS,
+        "Слишком много генераций. Подождите и попробуйте позже.",
+    )
+    check_rate_limit(
+        "generate-ip",
+        client_ip_from_request(http_request),
+        settings.SECURITY_GENERATE_IP_MAX_REQUESTS,
+        settings.SECURITY_GENERATE_IP_WINDOW_SECONDS,
+        "Слишком много генераций с этого адреса. Подождите и попробуйте позже.",
+    )
     try:
-        selected_model = request.model_name if request.model_name else DEFAULT_MODEL_ID
+        selected_model = body.model_name if body.model_name else DEFAULT_MODEL_ID
         keys = load_user_api_keys(user.user_id)
         model_provider = get_provider_for_model(selected_model, keys)
         if not model_provider:
@@ -49,8 +82,7 @@ async def generate_image(
                 status_code=400,
                 detail=f"Для модели «{selected_model}» нет подходящего API ключа. Добавьте ключ в настройках.",
             )
-        api_key = select_key_for_model(user.user_id, request.model_name, request.api_key)
-        _ = api_key
+        select_key_for_model(user.user_id, body.model_name)
 
         with db_service.get_session() as session:
             active_count = (
@@ -71,6 +103,7 @@ async def generate_image(
                 )
 
         reference_image_urls: List[str] = []
+        generation_id = None
         with db_service.get_session() as session:
             generation_metadata = {
                 "model_name": selected_model,
@@ -80,15 +113,15 @@ async def generate_image(
             }
             generation = Generation(
                 user_id=user.user_id,
-                prompt=request.prompt,
-                negative_prompt=request.negative_prompt,
-                generation_mode=request.generation_mode,
+                prompt=body.prompt,
+                negative_prompt=body.negative_prompt,
+                generation_mode=body.generation_mode,
                 model_name=selected_model,
-                resolution=request.resolution,
-                aspect_ratio=request.aspect_ratio,
-                guidance_scale=request.guidance_scale,
-                num_inference_steps=request.num_inference_steps,
-                seed=request.seed,
+                resolution=body.resolution,
+                aspect_ratio=body.aspect_ratio,
+                guidance_scale=body.guidance_scale,
+                num_inference_steps=body.num_inference_steps,
+                seed=body.seed,
                 status="pending",
                 generation_metadata=generation_metadata,
             )
@@ -97,17 +130,21 @@ async def generate_image(
             session.refresh(generation)
             generation_id = generation.id
 
-            if request.reference_images:
-                reference_image_urls = store_reference_images(_storage(), request.reference_images)
-                generation.generation_metadata["reference_images_count"] = len(request.reference_images)
+            if body.reference_images:
+                try:
+                    reference_image_urls = store_reference_images(
+                        _storage(), body.reference_images, user.user_id
+                    )
+                except Exception:
+                    session.delete(generation)
+                    session.commit()
+                    raise
+                generation.generation_metadata["reference_images_count"] = len(reference_image_urls)
                 generation.generation_metadata["reference_image_urls"] = reference_image_urls
                 flag_modified(generation, "generation_metadata")
                 session.commit()
 
-        payload = request.model_dump() if hasattr(request, "model_dump") else request.dict()
-        if reference_image_urls:
-            payload["reference_images"] = reference_image_urls
-        get_job_queue().enqueue(generation_id, user.user_id, payload)
+        get_job_queue().enqueue(generation_id, user.user_id, _queue_payload(body, reference_image_urls))
         return ImageGenerationResponse(
             status="pending",
             image_id=generation_id,
@@ -115,11 +152,11 @@ async def generate_image(
         )
     except HTTPException:
         raise
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        logger.error("[GENERATION] create failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Ошибка создания задачи генерации: {e}") from e
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception:
+        logger.error("[GENERATION] create failed", exc_info=True)
+        raise HTTPException(status_code=500, detail="Не удалось создать задачу генерации") from None
 
 
 @router.get("/list")
@@ -166,11 +203,7 @@ async def list_generations(
                 generation_mode=gen.generation_mode,
                 resolution=gen.resolution,
                 aspect_ratio=gen.aspect_ratio,
-                result_url=_storage().refresh_access_url(
-                    getattr(gen, "result_path", None) or gen.result_url
-                )
-                if gen.result_url
-                else gen.result_url,
+                result_url=client_result_url(gen),
                 status=gen.status,
                 created_at=gen.created_at,
                 error_message=meta.get("error"),
@@ -253,6 +286,79 @@ async def get_provider_status(
     return build_provider_status(user.user_id, model_name)
 
 
+def _load_accessible_generation(session, generation_id: int, user: TokenPayload) -> Generation:
+    generation = session.query(Generation).filter(Generation.id == generation_id).first()
+    if not generation:
+        raise HTTPException(status_code=404, detail="Генерация не найдена")
+    if generation.user_id == user.user_id:
+        return generation
+    if user.is_admin and user.totp_enabled:
+        return generation
+    raise HTTPException(status_code=404, detail="Генерация не найдена")
+
+
+def _media_bytes_response(data: bytes, content_type: str) -> Response:
+    return Response(
+        content=data,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "private, max-age=60",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+        },
+    )
+
+
+@router.get("/{generation_id}/file")
+async def get_generation_file(
+    generation_id: int,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    check_rate_limit(
+        "media-file",
+        str(user.user_id),
+        settings.SECURITY_MEDIA_MAX_REQUESTS,
+        settings.SECURITY_MEDIA_WINDOW_SECONDS,
+        "Слишком много загрузок изображений. Подождите.",
+    )
+    with db_service.get_session() as session:
+        generation = _load_accessible_generation(session, generation_id, user)
+        source = getattr(generation, "result_path", None) or generation.result_url
+        if not source:
+            raise HTTPException(status_code=404, detail="Генерация не найдена")
+    try:
+        data, content_type = _storage().get_object_bytes(source)
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(status_code=404, detail="Генерация не найдена") from None
+    return _media_bytes_response(data, content_type)
+
+
+@router.get("/{generation_id}/reference/{index}")
+async def get_generation_reference(
+    generation_id: int,
+    index: int,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    check_rate_limit(
+        "media-ref",
+        str(user.user_id),
+        settings.SECURITY_MEDIA_MAX_REQUESTS,
+        settings.SECURITY_MEDIA_WINDOW_SECONDS,
+        "Слишком много загрузок изображений. Подождите.",
+    )
+    with db_service.get_session() as session:
+        generation = _load_accessible_generation(session, generation_id, user)
+        stored = (generation.generation_metadata or {}).get("reference_image_urls") or []
+        if index < 0 or index >= len(stored) or not stored[index]:
+            raise HTTPException(status_code=404, detail="Генерация не найдена")
+        source = stored[index]
+    try:
+        data, content_type = _storage().get_object_bytes(source)
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(status_code=404, detail="Генерация не найдена") from None
+    return _media_bytes_response(data, content_type)
+
+
 @router.get("/{generation_id}")
 async def get_generation_full(
     generation_id: int,
@@ -278,15 +384,8 @@ async def get_generation_full(
             "num_inference_steps": generation.num_inference_steps,
             "seed": generation.seed,
             "model_name": model_name,
-            "reference_images": [
-                _storage().refresh_access_url(u) or u
-                for u in (metadata.get("reference_image_urls", []) or [])
-            ],
-            "result_url": _storage().refresh_access_url(
-                getattr(generation, "result_path", None) or generation.result_url
-            )
-            if generation.result_url
-            else generation.result_url,
+            "reference_images": client_reference_urls(generation),
+            "result_url": client_result_url(generation),
             "status": generation.status,
             "error_message": metadata.get("error"),
             **rewrite_metadata_fields(metadata),
@@ -314,6 +413,6 @@ async def delete_generation(
 
 @router.post("/cleanup")
 async def cleanup_endpoint(user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]):
-    if not user.is_admin:
+    if not user.is_admin or not user.totp_enabled:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     return cleanup_old_generations(_storage())

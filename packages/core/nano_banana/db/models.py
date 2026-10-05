@@ -18,6 +18,8 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)  # Переименовано из is_superuser
     replicate_api_key = Column(String, nullable=True)  # API ключ пользователя (зашифрован)
+    totp_secret = Column(String, nullable=True)  # зашифрованный секрет TOTP
+    totp_enabled = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)

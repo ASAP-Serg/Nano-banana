@@ -20,7 +20,16 @@ function PasswordField({ name, placeholder, minLength }) {
   );
 }
 
-export default function AuthModals({ showLogin, showRegister, onCloseLogin, onCloseRegister, onOpenRegister, onLogin, onRegister }) {
+export default function AuthModals({
+  showLogin,
+  showRegister,
+  needTotp,
+  onCloseLogin,
+  onCloseRegister,
+  onOpenRegister,
+  onLogin,
+  onRegister,
+}) {
   return (
     <>
       {showLogin && (
@@ -28,6 +37,17 @@ export default function AuthModals({ showLogin, showRegister, onCloseLogin, onCl
           <form onSubmit={onLogin}>
             <input className="form-control mb-2" name="username" placeholder="Имя или email" required />
             <PasswordField name="password" placeholder="Пароль" />
+            {needTotp && (
+              <input
+                className="form-control mb-3"
+                name="totp"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="Код из приложения (2FA)"
+                required
+              />
+            )}
             <button className="btn btn-primary w-100">Войти</button>
             <button type="button" className="btn btn-link w-100" onClick={onOpenRegister}>
               Нет аккаунта? Регистрация

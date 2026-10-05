@@ -1,18 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
-import { toast } from "../toast.js";
+import { isSafeMediaUrl, toast } from "../toast.js";
 import { IconToForm } from "../icons.jsx";
 import Lightbox from "./Lightbox.jsx";
-
-function isSafeMediaUrl(url) {
-  if (!url || typeof url !== "string") return false;
-  try {
-    const u = new URL(url, window.location.origin);
-    return u.protocol === "https:" || u.protocol === "http:";
-  } catch {
-    return false;
-  }
-}
+import Modal from "./Modal.jsx";
 
 export default function AdminPanel({ onClose, onInsertToForm }) {
   const [users, setUsers] = useState([]);
@@ -29,7 +20,28 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
   });
   const [page, setPage] = useState(0);
   const [lightbox, setLightbox] = useState(null);
+  const [pwModal, setPwModal] = useState(null);
+  const [pwValue, setPwValue] = useState("");
   const pageSize = 24;
+
+  function askPassword(title) {
+    return new Promise((resolve) => {
+      setPwValue("");
+      setPwModal({ title, resolve });
+    });
+  }
+
+  async function runUserAction(title, fn) {
+    const password = await askPassword(title);
+    if (!password) return;
+    try {
+      const result = await fn(password);
+      toast(result?.message || "Готово");
+      load();
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  }
 
   async function load() {
     try {
@@ -109,6 +121,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                   <th>Username</th>
                   <th>Email</th>
                   <th>Admin</th>
+                  <th>Статус</th>
                   <th></th>
                 </tr>
               </thead>
@@ -119,22 +132,49 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                     <td>{u.username}</td>
                     <td>{u.email}</td>
                     <td>{u.is_admin ? "да" : "нет"}</td>
+                    <td>{u.is_active === false ? "выкл" : "активен"}</td>
                     <td>
-                      {u.is_admin ? (
+                      <div className="d-flex flex-wrap gap-1">
+                        {u.is_admin ? (
+                          <button
+                            className="btn btn-sm btn-outline-warning"
+                            onClick={() => runUserAction("Снять права админа", (password) => api.adminRevoke(u.id, password))}
+                          >
+                            Снять
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => runUserAction("Назначить админом", (password) => api.adminGrant(u.id, password))}
+                          >
+                            Админ
+                          </button>
+                        )}
+                        {u.is_active === false ? (
+                          <button
+                            className="btn btn-sm btn-outline-success"
+                            onClick={() => runUserAction("Включить пользователя", (password) => api.adminActivate(u.id, password))}
+                          >
+                            Вкл
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => runUserAction("Выключить пользователя", (password) => api.adminDeactivate(u.id, password))}
+                          >
+                            Выкл
+                          </button>
+                        )}
                         <button
-                          className="btn btn-sm btn-outline-warning"
-                          onClick={() => api.adminRevoke(u.id).then(load).catch((e) => toast(e.message, "error"))}
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => {
+                            if (!window.confirm(`Удалить ${u.username}? Генерации и файлы тоже будут удалены.`)) return;
+                            runUserAction("Удалить пользователя", (password) => api.adminDeleteUser(u.id, password));
+                          }}
                         >
-                          Снять
+                          Удалить
                         </button>
-                      ) : (
-                        <button
-                          className="btn btn-sm btn-outline-primary"
-                          onClick={() => api.adminGrant(u.id).then(load).catch((e) => toast(e.message, "error"))}
-                        >
-                          Админ
-                        </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -278,6 +318,37 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
           onClose={() => setLightbox(null)}
           onIndex={setLightbox}
         />
+      )}
+      {pwModal && (
+        <Modal
+          title={pwModal.title}
+          onClose={() => {
+            pwModal.resolve(null);
+            setPwModal(null);
+          }}
+        >
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              pwModal.resolve(pwValue);
+              setPwModal(null);
+              setPwValue("");
+            }}
+          >
+            <p className="small text-muted">Подтвердите действие своим паролем.</p>
+            <input
+              className="form-control mb-3"
+              type="password"
+              autoComplete="current-password"
+              minLength={10}
+              value={pwValue}
+              onChange={(e) => setPwValue(e.target.value)}
+              autoFocus
+              required
+            />
+            <button className="btn btn-primary w-100">Подтвердить</button>
+          </form>
+        </Modal>
       )}
     </div>
   );

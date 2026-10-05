@@ -16,7 +16,6 @@ _DEFAULT_OUTBOUND_IMAGE_HOST_SUFFIXES = (
     "replicate.com",
     "pbxt.replicate.delivery",
     "moonez.ai",
-    "cloudflare.com",
     "r2.dev",
     "amazonaws.com",
     "googleusercontent.com",
@@ -169,6 +168,23 @@ def is_safe_outbound_image_url(url: str, settings: "Settings") -> bool:
 def assert_safe_outbound_image_url(url: str, settings: "Settings") -> None:
     if not is_safe_outbound_image_url(url, settings):
         raise ValueError("Outbound image URL blocked by SSRF policy")
+
+
+def public_validation_errors(errors: list) -> list:
+    """Pydantic errors without input/ctx — passwords must not hit logs or JSON."""
+    safe = []
+    for err in errors or []:
+        if not isinstance(err, dict):
+            continue
+        loc = err.get("loc")
+        safe.append(
+            {
+                "loc": list(loc) if isinstance(loc, (list, tuple)) else loc,
+                "msg": str(err.get("msg") or "invalid"),
+                "type": str(err.get("type") or "value_error"),
+            }
+        )
+    return safe
 
 
 def constant_time_secret_equal(expected: str, provided: Optional[str]) -> bool:

@@ -14,6 +14,7 @@ from nano_banana.config import settings
 from nano_banana.db.session import db_service
 from nano_banana.error_log import save_error_to_file
 from nano_banana.queue.jobs import get_job_queue
+from nano_banana.security import public_validation_errors
 from nano_banana.storage.s3 import MinioService
 from nano_banana_api.routers import api_router
 
@@ -114,8 +115,9 @@ app.add_middleware(CookieCsrfMiddleware)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    save_error_to_file({"type": "validation_error", "path": str(request.url.path), "errors": exc.errors()})
-    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": exc.errors()})
+    safe = public_validation_errors(exc.errors())
+    save_error_to_file({"type": "validation_error", "path": str(request.url.path), "errors": safe})
+    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"detail": safe})
 
 
 @app.exception_handler(Exception)

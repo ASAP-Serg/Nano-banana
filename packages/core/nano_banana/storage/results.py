@@ -20,6 +20,7 @@ DOWNLOAD_CONNECT_TIMEOUT = 30
 DOWNLOAD_READ_TIMEOUT = 120
 DOWNLOAD_RETRIES = 5
 MIN_IMAGE_BYTES = 512
+MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
 
 
 def _download_session() -> requests.Session:
@@ -43,11 +44,20 @@ def _download_session() -> requests.Session:
 def _read_response_bytes(resp: requests.Response, *, stream: bool) -> bytes:
     if stream:
         chunks: list[bytes] = []
+        total = 0
         for chunk in resp.iter_content(chunk_size=262144):
-            if chunk:
-                chunks.append(chunk)
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > MAX_DOWNLOAD_BYTES:
+                resp.close()
+                raise ValueError("image download exceeded size limit")
+            chunks.append(chunk)
         return b"".join(chunks)
-    return resp.content
+    data = resp.content
+    if len(data) > MAX_DOWNLOAD_BYTES:
+        raise ValueError("image download exceeded size limit")
+    return data
 
 
 def download_image_from_url(

@@ -5,6 +5,7 @@ export default function Navbar({
   onLogin,
   onKeys,
   onAdmin,
+  onTotp,
   onLogout,
 }) {
   return (
@@ -53,11 +54,20 @@ export default function Navbar({
                     </button>
                   </li>
                   {user.is_admin && (
-                    <li>
-                      <button className="dropdown-item" onClick={onAdmin}>
-                        Админ-панель
-                      </button>
-                    </li>
+                    <>
+                      {!user.totp_enabled && (
+                        <li>
+                          <button className="dropdown-item" onClick={onTotp}>
+                            Включить 2FA
+                          </button>
+                        </li>
+                      )}
+                      <li>
+                        <button className="dropdown-item" onClick={onAdmin}>
+                          Админ-панель
+                        </button>
+                      </li>
+                    </>
                   )}
                   <li>
                     <button className="dropdown-item" onClick={onLogout}>

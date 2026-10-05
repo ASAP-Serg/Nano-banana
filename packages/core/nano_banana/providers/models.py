@@ -201,9 +201,7 @@ def select_api_key_for_model(
     keys: Dict[str, str],
     api_key_from_request: Optional[str] = None,
 ) -> str:
-    if api_key_from_request and str(api_key_from_request).strip():
-        return str(api_key_from_request).strip()
-
+    del api_key_from_request  # ключ только из зашифрованного хранилища пользователя
     provider = get_provider_for_model(model_id, keys)
     if provider:
         return keys[provider]

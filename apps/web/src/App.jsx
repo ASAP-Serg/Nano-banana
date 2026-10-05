@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, clearLegacyToken } from "./api.js";
-import { toast } from "./toast.js";
+import { isSafeMediaUrl, toast } from "./toast.js";
 import Navbar from "./components/Navbar.jsx";
 import StatusBar from "./components/StatusBar.jsx";
 import GenerateForm from "./components/GenerateForm.jsx";
@@ -10,6 +10,7 @@ import AuthModals from "./components/AuthModals.jsx";
 import KeysModal from "./components/KeysModal.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import ParamsModal from "./components/ParamsModal.jsx";
+import TotpSetup from "./components/TotpSetup.jsx";
 
 export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem("nb_theme") || "dark");
@@ -19,6 +20,8 @@ export default function App() {
   const [showRegister, setShowRegister] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showTotp, setShowTotp] = useState(false);
+  const [needTotp, setNeedTotp] = useState(false);
   const [status, setStatus] = useState(null);
   const [models, setModels] = useState({});
   const [defaultModel, setDefaultModel] = useState("nano-banana-pro");
@@ -92,6 +95,12 @@ export default function App() {
   }, [loadMe]);
 
   useEffect(() => {
+    if (user?.is_admin && user.totp_enabled === false) {
+      setShowTotp(true);
+    }
+  }, [user]);
+
+  useEffect(() => {
     if (!authChecked) return;
     if (!user) {
       setStatus(null);
@@ -114,12 +123,18 @@ export default function App() {
     e.preventDefault();
     const form = new FormData(e.target);
     try {
-      await api.login(form.get("username"), form.get("password"));
+      await api.login(form.get("username"), form.get("password"), form.get("totp"));
       clearLegacyToken();
+      setNeedTotp(false);
       setShowLogin(false);
       await loadMe();
       toast("Вход выполнен");
     } catch (err) {
+      if (err.message === "TOTP_REQUIRED") {
+        setNeedTotp(true);
+        toast("Введите код из приложения-аутентификатора");
+        return;
+      }
       toast(err.message, "error");
     }
   }
@@ -148,6 +163,8 @@ export default function App() {
     setUser(null);
     setGallery([]);
     setShowAdmin(false);
+    setShowTotp(false);
+    setNeedTotp(false);
   }
 
   async function onGenerate(payload) {
@@ -208,7 +225,7 @@ export default function App() {
     }
   }
 
-  const lightboxItems = gallery.filter((g) => g.result_url);
+  const lightboxItems = gallery.filter((g) => isSafeMediaUrl(g.result_url));
 
   return (
     <>
@@ -218,7 +235,11 @@ export default function App() {
         user={user}
         onLogin={() => setShowLogin(true)}
         onKeys={() => setShowKeys(true)}
-        onAdmin={() => setShowAdmin(true)}
+        onAdmin={() => {
+          if (user?.is_admin && !user.totp_enabled) setShowTotp(true);
+          else setShowAdmin(true);
+        }}
+        onTotp={() => setShowTotp(true)}
         onLogout={onLogout}
       />
       <StatusBar status={status} />
@@ -258,22 +279,36 @@ export default function App() {
             />
           </div>
         </div>
-        {showAdmin && user?.is_admin && (
+        {showAdmin && user?.is_admin && user?.totp_enabled && (
           <AdminPanel onClose={() => setShowAdmin(false)} onInsertToForm={applyAdmin} />
         )}
       </main>
       <AuthModals
         showLogin={showLogin}
         showRegister={showRegister}
-        onCloseLogin={() => setShowLogin(false)}
+        needTotp={needTotp}
+        onCloseLogin={() => {
+          setShowLogin(false);
+          setNeedTotp(false);
+        }}
         onCloseRegister={() => setShowRegister(false)}
         onOpenRegister={() => {
           setShowLogin(false);
+          setNeedTotp(false);
           setShowRegister(true);
         }}
         onLogin={onLogin}
         onRegister={onRegister}
       />
+      {showTotp && user?.is_admin && !user.totp_enabled && (
+        <TotpSetup
+          onClose={() => setShowTotp(false)}
+          onEnabled={async () => {
+            setShowTotp(false);
+            await loadMe();
+          }}
+        />
+      )}
       {showKeys && (
         <KeysModal
           keys={keys}

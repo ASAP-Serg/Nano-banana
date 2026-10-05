@@ -60,5 +60,6 @@ def dump_user_api_keys(keys: dict) -> Optional[str]:
 
 
 def select_key_for_model(user_id: int, model_name: Optional[str], api_key_from_request: Optional[str] = None) -> str:
+    del api_key_from_request
     keys = load_user_api_keys(user_id)
-    return select_api_key_for_model(model_name, keys, api_key_from_request)
+    return select_api_key_for_model(model_name, keys)

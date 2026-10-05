@@ -11,9 +11,22 @@ export function toast(message, type = "success") {
   }, 3500);
 }
 
+export function isSafeMediaUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  const value = url.trim();
+  if (!value || value.includes("..")) return false;
+  try {
+    const parsed = new URL(value, window.location.origin);
+    if (parsed.origin !== window.location.origin) return false;
+    return parsed.pathname.startsWith("/api/v1/images/");
+  } catch {
+    return false;
+  }
+}
+
 export async function downloadImage(imageUrl, prompt) {
   try {
-    const response = await fetch(imageUrl);
+    const response = await fetch(imageUrl, { credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);

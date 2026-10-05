@@ -14,6 +14,8 @@ from nano_banana.auth import auth_service
 from nano_banana.db.session import db_service
 from nano_banana.config import settings
 from nano_banana.rate_limit import check_rate_limit
+from nano_banana.schemas import AdminPasswordRequest
+from nano_banana.storage.media import client_reference_urls, client_result_url
 from nano_banana.storage.s3 import MinioService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -30,6 +32,8 @@ def _storage() -> MinioService:
 def _require_admin(user: TokenPayload):
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Доступ только для админов")
+    if not user.totp_enabled:
+        raise HTTPException(status_code=403, detail="Включите двухфакторную аутентификацию")
 
 
 def _rate_limit_admin_read(user_id: int, scope: str):
@@ -40,6 +44,23 @@ def _rate_limit_admin_read(user_id: int, scope: str):
         settings.SECURITY_ADMIN_READ_WINDOW_SECONDS,
         "Слишком много админ-запросов. Повторите позже.",
     )
+
+
+def _rate_limit_admin_write(user_id: int):
+    check_rate_limit(
+        "admin-write",
+        str(user_id),
+        settings.SECURITY_ADMIN_WRITE_MAX_REQUESTS,
+        settings.SECURITY_ADMIN_WRITE_WINDOW_SECONDS,
+        "Слишком много админ-действий. Повторите позже.",
+    )
+
+
+def _verify_admin_password(actor: TokenPayload, password: str):
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == actor.user_id).first()
+        if not db_user or not auth_service.verify_password(password, db_user.hashed_password):
+            raise HTTPException(status_code=401, detail="Неверный пароль")
 
 def _audit_admin_action(session, actor_admin_id: int, action: str, target_user_id: Optional[int], details: Optional[dict] = None):
     log_row = AdminAuditLog(
@@ -82,15 +103,8 @@ def _generation_full_payload(gen: Generation, username: Optional[str] = None) ->
         "num_inference_steps": gen.num_inference_steps,
         "seed": gen.seed,
         "model_name": model_name,
-        "reference_images": [
-            _storage().refresh_access_url(u) or u
-            for u in (metadata.get("reference_image_urls") or [])
-        ],
-        "result_url": _storage().refresh_access_url(
-            getattr(gen, "result_path", None) or gen.result_url
-        )
-        if gen.result_url
-        else gen.result_url,
+        "reference_images": client_reference_urls(gen),
+        "result_url": client_result_url(gen),
         "status": gen.status,
         "error_message": metadata.get("error"),
         "provider": _infer_provider(gen),
@@ -150,6 +164,7 @@ async def admin_list_users(
                     "email": u.email,
                     "is_admin": bool(u.is_admin),
                     "is_active": bool(u.is_active),
+                    "totp_enabled": bool(getattr(u, "totp_enabled", False)),
                     "created_at": u.created_at.isoformat() if u.created_at else None,
                     "last_login": u.last_login.isoformat() if u.last_login else None,
                 }
@@ -185,9 +200,12 @@ async def admin_filters(
 @router.post("/users/{target_user_id}/grant-admin")
 async def admin_grant_role(
     target_user_id: int,
+    body: AdminPasswordRequest,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
     with db_service.get_session() as session:
         target = session.query(User).filter(User.id == target_user_id).first()
         if not target:
@@ -207,9 +225,12 @@ async def admin_grant_role(
 @router.post("/users/{target_user_id}/revoke-admin")
 async def admin_revoke_role(
     target_user_id: int,
+    body: AdminPasswordRequest,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
     with db_service.get_session() as session:
         target = session.query(User).filter(User.id == target_user_id).first()
         if not target:
@@ -232,6 +253,128 @@ async def admin_revoke_role(
         )
         session.commit()
         return {"message": f"Права админа сняты у пользователя {target.username}"}
+
+
+def _target_user(session, target_user_id: int) -> User:
+    target = session.query(User).filter(User.id == target_user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return target
+
+
+def _forbid_self(actor: TokenPayload, target: User):
+    if target.id == actor.user_id:
+        raise HTTPException(status_code=400, detail="Нельзя изменить свою учётную запись")
+
+
+def _forbid_last_active_admin(session, target: User):
+    if not target.is_admin:
+        return
+    active_admins = (
+        session.query(User)
+        .filter(User.is_admin.is_(True), User.is_active.is_(True))
+        .count()
+    )
+    if active_admins <= 1:
+        raise HTTPException(status_code=400, detail="Нельзя трогать последнего активного админа")
+
+
+def _purge_user_files(session, user_id: int):
+    storage = _storage()
+    gens = session.query(Generation).filter(Generation.user_id == user_id).all()
+    for gen in gens:
+        path = getattr(gen, "result_path", None)
+        if path:
+            storage.delete_image(path)
+        meta = gen.generation_metadata or {}
+        for url in meta.get("reference_image_urls") or []:
+            object_path = storage.extract_object_path(url)
+            if object_path:
+                storage.delete_image(object_path)
+
+
+@router.post("/users/{target_user_id}/deactivate")
+async def admin_deactivate_user(
+    target_user_id: int,
+    body: AdminPasswordRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    with db_service.get_session() as session:
+        target = _target_user(session, target_user_id)
+        _forbid_self(user, target)
+        _forbid_last_active_admin(session, target)
+        target.is_active = False
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="deactivate_user",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
+        session.commit()
+        return {"message": f"Пользователь {target.username} выключен"}
+
+
+@router.post("/users/{target_user_id}/activate")
+async def admin_activate_user(
+    target_user_id: int,
+    body: AdminPasswordRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    with db_service.get_session() as session:
+        target = _target_user(session, target_user_id)
+        _forbid_self(user, target)
+        target.is_active = True
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="activate_user",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
+        session.commit()
+        return {"message": f"Пользователь {target.username} включён"}
+
+
+@router.delete("/users/{target_user_id}")
+async def admin_delete_user(
+    target_user_id: int,
+    body: AdminPasswordRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    with db_service.get_session() as session:
+        target = _target_user(session, target_user_id)
+        _forbid_self(user, target)
+        _forbid_last_active_admin(session, target)
+        username = target.username
+        _purge_user_files(session, target.id)
+        session.query(AdminAuditLog).filter(
+            or_(
+                AdminAuditLog.actor_admin_id == target.id,
+                AdminAuditLog.target_user_id == target.id,
+            )
+        ).delete(synchronize_session=False)
+        session.query(Generation).filter(Generation.user_id == target.id).delete(synchronize_session=False)
+        session.delete(target)
+        session.flush()
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="delete_user",
+            target_user_id=None,
+            details={"deleted_user_id": target_user_id, "target_username": username},
+        )
+        session.commit()
+        return {"message": f"Пользователь {username} удалён"}
 
 
 @router.get("/generations")
@@ -295,11 +438,7 @@ async def admin_list_generations(
                     "model_name": gen.model_name,
                     "resolution": gen.resolution,
                     "aspect_ratio": gen.aspect_ratio,
-                    "result_url": _storage().refresh_access_url(
-                        getattr(gen, "result_path", None) or gen.result_url
-                    )
-                    if gen.result_url
-                    else gen.result_url,
+                    "result_url": client_result_url(gen),
                     "error": metadata.get("error"),
                     "error_message": metadata.get("error"),
                     "created_at": gen.created_at.isoformat() if gen.created_at else None,

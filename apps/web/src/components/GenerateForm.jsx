@@ -3,6 +3,12 @@ import { ASPECTS, GROUP_LABELS, PROVIDER_BADGE, fileToDataUrl, toast } from "../
 
 const GROUP_ORDER = ["bananalab", "replicate", "openrouter"];
 
+const MAX_REF_COUNT = 4;
+const MAX_REF_BYTES = 20 * 1024 * 1024;
+const MAX_PROMPT_LENGTH = 4000;
+const MAX_NEGATIVE_LENGTH = 2000;
+const ALLOWED_REF_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
 function modelHasKey(meta, keys) {
   const ready = typeof keys?.has_bananalab_key === "boolean";
   if (!ready) return meta?.available !== false;
@@ -19,7 +25,12 @@ function modelHasKey(meta, keys) {
 async function collectImageFiles(fileList) {
   const next = [];
   for (const file of fileList) {
-    if (!file.type?.startsWith("image/")) continue;
+    const type = (file.type || "").toLowerCase();
+    if (!ALLOWED_REF_TYPES.has(type)) continue;
+    if (file.size > MAX_REF_BYTES) {
+      toast("Референс больше 20MB — пропущен", "error");
+      continue;
+    }
     next.push({ id: crypto.randomUUID(), dataUrl: await fileToDataUrl(file), name: file.name });
   }
   return next;
@@ -108,7 +119,7 @@ const GenerateForm = forwardRef(function GenerateForm({
       void (async () => {
         const extra = await collectImageFiles(files);
         if (!extra.length) return;
-        setRefs((prev) => [...prev, ...extra].slice(0, 4));
+        setRefs((prev) => [...prev, ...extra].slice(0, MAX_REF_COUNT));
         setMode("image-to-image");
       })();
     };
@@ -131,7 +142,7 @@ const GenerateForm = forwardRef(function GenerateForm({
         localStorage.setItem("nb_model", nextModel);
       }
       const urls = gen.reference_images || [];
-      setRefs(urls.map((url) => ({ id: crypto.randomUUID(), dataUrl: url, name: "ref" })));
+      setRefs(urls.slice(0, MAX_REF_COUNT).map((url) => ({ id: crypto.randomUUID(), dataUrl: url, name: "ref" })));
       setMode(urls.length || gen.generation_mode === "image-to-image" ? "image-to-image" : "text-to-image");
       toast("Форма заполнена параметрами генерации");
     },
@@ -154,7 +165,7 @@ const GenerateForm = forwardRef(function GenerateForm({
     const extra = await collectImageFiles(files);
     if (!extra.length) return;
     setRefs((prev) => {
-      const merged = [...prev, ...extra].slice(0, 4);
+      const merged = [...prev, ...extra].slice(0, MAX_REF_COUNT);
       return merged;
     });
     setMode("image-to-image");
@@ -385,7 +396,14 @@ const GenerateForm = forwardRef(function GenerateForm({
           )}
           <div className="mb-3">
             <label className="form-label">Описание</label>
-            <textarea className="form-control" rows="3" required value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            <textarea
+              className="form-control"
+              rows="3"
+              required
+              maxLength={MAX_PROMPT_LENGTH}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT_LENGTH))}
+            />
           </div>
           <div className="form-check mb-3">
             <input
@@ -404,7 +422,13 @@ const GenerateForm = forwardRef(function GenerateForm({
           </div>
           <div className="mb-3">
             <label className="form-label">Негативный промпт</label>
-            <textarea className="form-control" rows="2" value={negative} onChange={(e) => setNegative(e.target.value)} />
+            <textarea
+              className="form-control"
+              rows="2"
+              maxLength={MAX_NEGATIVE_LENGTH}
+              value={negative}
+              onChange={(e) => setNegative(e.target.value.slice(0, MAX_NEGATIVE_LENGTH))}
+            />
           </div>
           <div className="row mb-3">
             <div className="col-6">

@@ -18,6 +18,9 @@ oauth2_scheme = HTTPBearer(auto_error=False)
 ACCESS_COOKIE = "nb_access"
 
 class AuthService:
+    # Фиксированный хеш для одинакового времени ответа, если пользователя нет.
+    DUMMY_PASSWORD_HASH = "$2b$12$Gzm4empP4APruGGwX8PXDOJzZ1G.DhvwJ2w5owre9s54Ot3Wnwq8y"
+
     def __init__(self):
         # Убрали passlib, используем только прямой bcrypt
         self.secret_key = settings.SECRET_KEY
@@ -27,10 +30,12 @@ class AuthService:
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Проверка пароля"""
-        # Обрезаем пароль до 72 байт при проверке
-        password_bytes = self._truncate_password(plain_password)
-        hashed_bytes = hashed_password.encode('utf-8')
-        return bcrypt.checkpw(password_bytes, hashed_bytes)
+        try:
+            password_bytes = self._truncate_password(plain_password)
+            hashed_bytes = (hashed_password or "").encode("utf-8")
+            return bcrypt.checkpw(password_bytes, hashed_bytes)
+        except (ValueError, TypeError):
+            return False
 
     def _truncate_password(self, password: str) -> bytes:
         """Обрезает пароль до 72 байт с учетом UTF-8"""
@@ -67,14 +72,11 @@ class AuthService:
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
 
     async def create_access_token(self, user_data: User) -> str:
-        """Создание access токена"""
+        """Создание access токена. Роли и email не кладём в JWT — только из БД."""
         return self.create_token(
             data={
                 "sub": user_data.username,
                 "user_id": user_data.id,
-                "email": user_data.email,
-                "is_active": user_data.is_active,
-                "is_admin": user_data.is_admin
             },
             expires_delta=self.access_token_expire
         )
@@ -100,15 +102,9 @@ class AuthService:
     async def _user_from_token(self, token: str) -> TokenPayload:
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-            token_payload = TokenPayload(
-                username=payload.get("sub"),
-                user_id=payload.get("user_id"),
-                email=payload.get("email"),
-                is_active=payload.get("is_active"),
-                is_admin=payload.get("is_admin"),
-            )
-
-            if not token_payload.username or not token_payload.user_id:
+            username = payload.get("sub")
+            user_id = payload.get("user_id")
+            if not username or user_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid token claims",
@@ -117,7 +113,7 @@ class AuthService:
             # Истина по ролям и активности берется из БД, чтобы изменения (grant/revoke)
             # применялись сразу, без ожидания истечения JWT.
             with db_service.get_session() as session:
-                db_user = session.query(User).filter(User.id == token_payload.user_id).first()
+                db_user = session.query(User).filter(User.id == user_id).first()
                 if not db_user:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -135,8 +131,11 @@ class AuthService:
                     email=db_user.email,
                     is_active=bool(db_user.is_active),
                     is_admin=bool(db_user.is_admin),
+                    totp_enabled=bool(getattr(db_user, "totp_enabled", False)),
                 )
 
+        except HTTPException:
+            raise
         except JWTError as e:
             logger.warning(f"Token decode error: {e}")
             raise HTTPException(

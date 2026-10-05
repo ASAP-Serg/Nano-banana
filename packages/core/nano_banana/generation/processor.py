@@ -8,12 +8,12 @@ from typing import Any, Dict, Optional
 from sqlalchemy.orm.attributes import flag_modified
 
 from nano_banana.config import settings
-from nano_banana.crypto import CryptoService
 from nano_banana.db.models import Generation
 from nano_banana.db.session import db_service
 from nano_banana.error_log import save_error_to_file
 from nano_banana.generation import runtime
 from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
+from nano_banana.generation.references import materialize_reference_images
 from nano_banana.providers.detect import infer_image_api_provider
 from nano_banana.providers.errors import (
     BANANALAB_EMPTY_DONE_RETRY_MESSAGE,
@@ -73,23 +73,9 @@ def rewrite_metadata_fields(metadata: Optional[dict]) -> dict:
     }
 
 
-def _encrypt_api_key(api_key: str) -> str:
-    return CryptoService.encrypt(api_key) if api_key else ""
-
-
-def _decrypt_api_key(token: Optional[str]) -> Optional[str]:
-    return CryptoService.decrypt(token) if token else None
-
-
 def _build_resume_payload(generation: Generation, request_data: dict) -> Dict[str, Any]:
     metadata = generation.generation_metadata or {}
-    plain_api_key = request_data.get("api_key")
-    encrypted = request_data.get("api_key_encrypted") or ""
-    if plain_api_key and not encrypted:
-        encrypted = _encrypt_api_key(plain_api_key)
     return {
-        # Только шифрованная форма — plaintext api_key не сохраняем.
-        "api_key_encrypted": encrypted,
         "prompt": request_data.get("prompt") or generation.prompt,
         "negative_prompt": request_data.get("negative_prompt") or generation.negative_prompt,
         "resolution": request_data.get("resolution") or generation.resolution,
@@ -179,15 +165,20 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
             if not generation:
                 logger.error("[GENERATION] %s not found", generation_id)
                 return
+            if int(generation.user_id) != int(user_id):
+                logger.error(
+                    "[GENERATION] owner mismatch gen=%s job_user=%s owner=%s",
+                    generation_id,
+                    user_id,
+                    generation.user_id,
+                )
+                return
             generation.status = "running"
             session.commit()
             queue.refresh_lock(generation_id)
 
-            api_key_from_request = request_data.get("api_key")
-            if (not api_key_from_request or not str(api_key_from_request).strip()) and request_data.get("api_key_encrypted"):
-                api_key_from_request = _decrypt_api_key(request_data.get("api_key_encrypted"))
-            api_key = select_key_for_model(user_id, request_data.get("model_name"), api_key_from_request)
-            keys = load_user_api_keys(user_id)
+            api_key = select_key_for_model(generation.user_id, request_data.get("model_name") or generation.model_name)
+            keys = load_user_api_keys(generation.user_id)
             provider = get_provider_for_model(request_data.get("model_name"), keys) or infer_image_api_provider(api_key)
             provider_label_text = provider_label(provider)
 
@@ -199,7 +190,8 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 else:
                     generation_service = ReplicateService(api_token=api_key)
             except Exception as init_error:
-                _fail(generation, session, f"Ошибка инициализации клиента ({provider_label_text}): {init_error}")
+                logger.error("[GENERATION] client init failed: %s", init_error)
+                _fail(generation, session, f"Ошибка инициализации клиента ({provider_label_text})")
                 return
 
             model_name = request_data.get("model_name") or generation.model_name or "nano-banana-pro"
@@ -213,6 +205,15 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
             policy_gpt_used = 0
             result = None
             last_raw_error = ""
+            try:
+                provider_refs = materialize_reference_images(
+                    get_storage(),
+                    request_data.get("reference_images") or [],
+                )
+            except Exception:
+                logger.exception("[GENERATION] reference materialize failed gen=%s", generation_id)
+                _fail(generation, session, "Не удалось прочитать референс.")
+                return
 
             while True:
                 queue.refresh_lock(generation_id)
@@ -225,7 +226,7 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                         guidance_scale=request_data.get("guidance_scale", 7.5),
                         num_inference_steps=request_data.get("num_inference_steps", 50),
                         seed=request_data.get("seed"),
-                        reference_images=request_data.get("reference_images"),
+                        reference_images=provider_refs,
                         model_name=model_name,
                     )
                 except Exception as gen_error:
@@ -291,7 +292,7 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                         "Сеть или сервис провайдера могли быть недоступны — повторите генерацию.",
                     )
                     return
-                generation.result_url = upload_result["url"]
+                generation.result_url = upload_result["path"]
                 generation.result_path = upload_result["path"]
                 generation.status = "completed"
                 generation.completed_at = datetime.utcnow()

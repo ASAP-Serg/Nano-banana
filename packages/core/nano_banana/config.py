@@ -133,8 +133,18 @@ class Settings(BaseSettings):
     SECURITY_ENABLE_HSTS: bool = True
     SECURITY_LOGIN_MAX_ATTEMPTS: int = 8
     SECURITY_LOGIN_WINDOW_SECONDS: int = 300
+    SECURITY_GENERATE_MAX_REQUESTS: int = 20
+    SECURITY_GENERATE_WINDOW_SECONDS: int = 3600
+    SECURITY_GENERATE_IP_MAX_REQUESTS: int = 40
+    SECURITY_GENERATE_IP_WINDOW_SECONDS: int = 3600
     SECURITY_ADMIN_READ_MAX_REQUESTS: int = 120
     SECURITY_ADMIN_READ_WINDOW_SECONDS: int = 60
+    SECURITY_ADMIN_WRITE_MAX_REQUESTS: int = 20
+    SECURITY_ADMIN_WRITE_WINDOW_SECONDS: int = 60
+    SECURITY_MEDIA_MAX_REQUESTS: int = 240
+    SECURITY_MEDIA_WINDOW_SECONDS: int = 60
+    SECURITY_TOTP_MAX_ATTEMPTS: int = 8
+    SECURITY_TOTP_WINDOW_SECONDS: int = 300
     SECURITY_CSP_ALLOW_INLINE_SCRIPTS: bool = False
     SECURITY_CSP_ALLOW_MINIO_CONSOLE_FRAME: bool = False
     SECURITY_DISABLE_OPENAPI: bool = True
@@ -174,6 +184,9 @@ class Settings(BaseSettings):
         api_lower = (self.API_URL or "").lower()
         if self.S3_PUBLIC_READ and api_lower.startswith("https://") and "localhost" not in api_lower:
             raise ValueError("S3_PUBLIC_READ=true запрещён в production (API_URL=https)")
+        algo = (self.ALGORITHM or "").strip().upper()
+        if algo != "HS256":
+            raise ValueError("ALGORITHM must be HS256")
         if self.is_production:
             dek = (self.DATA_ENCRYPTION_KEY or "").strip()
             if len(dek) < 32 or dek == (self.SECRET_KEY or "").strip():

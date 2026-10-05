@@ -45,12 +45,20 @@ async function request(path, { method = "GET", body, auth = true, headers = {} }
 }
 
 export const api = {
-  login: (username_or_email, password) =>
-    request("/auth/login", { method: "POST", body: { username_or_email, password }, auth: false }),
+  login: (username_or_email, password, totp_code) =>
+    request("/auth/login", {
+      method: "POST",
+      body: totp_code
+        ? { username_or_email, password, totp_code }
+        : { username_or_email, password },
+      auth: false,
+    }),
   register: (username, email, password) =>
     request("/auth/register", { method: "POST", body: { username, email, password }, auth: false }),
   logout: () => request("/auth/logout", { method: "POST", auth: false }),
   me: () => request("/auth/me"),
+  totpBegin: () => request("/auth/totp/begin", { method: "POST" }),
+  totpConfirm: (code) => request("/auth/totp/confirm", { method: "POST", body: { code } }),
   models: () => request("/images/models"),
   generate: (payload) => request("/images/generate", { method: "POST", body: payload }),
   list: (limit = 50, offset = 0) => request(`/images/list?limit=${limit}&offset=${offset}`),
@@ -72,7 +80,15 @@ export const api = {
     });
     return request(`/admin/generations?${q.toString()}`);
   },
-  adminGrant: (id) => request(`/admin/users/${id}/grant-admin`, { method: "POST" }),
-  adminRevoke: (id) => request(`/admin/users/${id}/revoke-admin`, { method: "POST" }),
+  adminGrant: (id, password) =>
+    request(`/admin/users/${id}/grant-admin`, { method: "POST", body: { password } }),
+  adminRevoke: (id, password) =>
+    request(`/admin/users/${id}/revoke-admin`, { method: "POST", body: { password } }),
+  adminDeactivate: (id, password) =>
+    request(`/admin/users/${id}/deactivate`, { method: "POST", body: { password } }),
+  adminActivate: (id, password) =>
+    request(`/admin/users/${id}/activate`, { method: "POST", body: { password } }),
+  adminDeleteUser: (id, password) =>
+    request(`/admin/users/${id}`, { method: "DELETE", body: { password } }),
   adminGeneration: (id) => request(`/admin/generations/${id}`),
 };

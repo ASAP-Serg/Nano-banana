@@ -177,3 +177,170 @@ class TestBolaGenerationOwnership(unittest.TestCase):
             msg="get/delete must filter by owning user_id",
         )
 
+
+class TestGenerationInputLimits(unittest.TestCase):
+    def test_long_prompt_rejected(self):
+        from pydantic import ValidationError
+
+        from nano_banana.schemas import MAX_PROMPT_LENGTH, ImageGenerationRequest
+
+        with self.assertRaises(ValidationError):
+            ImageGenerationRequest(prompt="x" * (MAX_PROMPT_LENGTH + 1))
+
+    def test_too_many_refs_rejected(self):
+        from pydantic import ValidationError
+
+        from nano_banana.schemas import ImageGenerationRequest
+
+        with self.assertRaises(ValidationError):
+            ImageGenerationRequest(prompt="cat", reference_images=["a", "b", "c", "d", "e"])
+
+    def test_api_key_in_body_is_dropped(self):
+        from nano_banana.schemas import ImageGenerationRequest
+
+        body = ImageGenerationRequest(prompt="cat", api_key="sk-or-stolen")
+        dumped = body.model_dump()
+        self.assertNotIn("api_key", dumped)
+        self.assertEqual(body.prompt, "cat")
+
+    def test_bad_resolution_rejected(self):
+        from pydantic import ValidationError
+
+        from nano_banana.schemas import ImageGenerationRequest
+
+        with self.assertRaises(ValidationError):
+            ImageGenerationRequest(prompt="cat", resolution="8K")
+
+
+class TestQueuePayloadNoSecrets(unittest.TestCase):
+    def test_generate_router_does_not_enqueue_api_key(self):
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "images.py"
+        )
+        text = src.read_text(encoding="utf-8")
+        self.assertIn("def _queue_payload", text)
+        self.assertNotIn("request.api_key", text)
+        self.assertIn("check_rate_limit", text)
+        self.assertIn("generate-user", text)
+
+
+class TestPublicValidationErrors(unittest.TestCase):
+    def test_strips_input_and_ctx(self):
+        from nano_banana.security import public_validation_errors
+
+        raw = [
+            {
+                "loc": ["body", "password"],
+                "msg": "too short",
+                "type": "value_error",
+                "input": "super-secret-password",
+                "ctx": {"min_length": 10},
+            }
+        ]
+        out = public_validation_errors(raw)
+        self.assertEqual(out[0]["loc"], ["body", "password"])
+        self.assertEqual(out[0]["msg"], "too short")
+        self.assertNotIn("input", out[0])
+        self.assertNotIn("ctx", out[0])
+
+
+class TestSelectKeyIgnoresRequestOverride(unittest.TestCase):
+    def test_stored_key_wins(self):
+        from nano_banana.providers.models import select_api_key_for_model
+
+        keys = {"replicate": "r8_stored", "bananalab": "", "openrouter": ""}
+        self.assertEqual(
+            select_api_key_for_model("nano-banana-pro-r8", keys, "r8_from_request"),
+            "r8_stored",
+        )
+
+
+class TestResidualRemoteSurface(unittest.TestCase):
+    def test_images_router_does_not_presign_to_clients(self):
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "images.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("refresh_access_url", text)
+        self.assertIn("/{generation_id}/file", text)
+        self.assertIn("client_result_url", text)
+
+    def test_admin_router_does_not_presign_to_clients(self):
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "admin.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("refresh_access_url", text)
+        self.assertIn("AdminPasswordRequest", text)
+        self.assertIn("_verify_admin_password", text)
+        self.assertIn("totp_enabled", text)
+
+    def test_cookie_and_login_timing(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        auth_router = (root / "apps" / "api" / "nano_banana_api" / "routers" / "auth.py").read_text(
+            encoding="utf-8"
+        )
+        auth_core = (root / "packages" / "core" / "nano_banana" / "auth.py").read_text(encoding="utf-8")
+        self.assertIn('samesite="strict"', auth_router)
+        self.assertNotIn('samesite="lax"', auth_router)
+        self.assertIn("TOTP_REQUIRED", auth_router)
+        self.assertIn("DUMMY_PASSWORD_HASH", auth_core)
+        self.assertNotIn('"is_admin": user_data.is_admin', auth_core)
+        self.assertNotIn('"email": user_data.email', auth_core)
+
+    def test_client_media_urls_are_relative_proxy(self):
+        from nano_banana.storage.media import client_reference_urls, client_result_url
+
+        gen = SimpleNamespace(
+            id=9,
+            result_path="images/x.jpg",
+            result_url="images/x.jpg",
+            generation_metadata={"reference_image_urls": ["images/r.jpg"]},
+        )
+        self.assertEqual(client_result_url(gen), "/api/v1/images/9/file")
+        self.assertEqual(client_reference_urls(gen), ["/api/v1/images/9/reference/0"])
+
+    def test_http_reference_from_client_rejected(self):
+        from nano_banana.generation.references import store_reference_images
+
+        with self.assertRaises(ValueError):
+            store_reference_images(object(), ["https://evil.example/a.png"], 1)
+
+    def test_cloudflare_not_in_outbound_allowlist(self):
+        from nano_banana.config import settings
+        from nano_banana.security import assert_safe_outbound_image_url
+
+        with self.assertRaises(ValueError):
+            assert_safe_outbound_image_url("https://cdn.cloudflare.com/img.jpg", settings)
+
+    def test_web_media_url_allowlist(self):
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[1] / "apps" / "web" / "src" / "toast.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("export function isSafeMediaUrl", text)
+        self.assertIn('credentials: "include"', text)
+        self.assertIn("/api/v1/images/", text)
+

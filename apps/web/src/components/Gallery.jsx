@@ -1,20 +1,10 @@
-import { downloadImage, PROVIDER_BADGE, toast } from "../toast.js";
+import { downloadImage, isSafeMediaUrl, PROVIDER_BADGE, toast } from "../toast.js";
 import { IconButton, IconDownload, IconInfo, IconRefresh, IconToForm, IconTrash } from "../icons.jsx";
 
 function statusLabel(item) {
   if (item.status === "pending" || item.status === "running") return "в очереди / идёт";
   if (item.status === "paused") return "пауза";
   return item.status;
-}
-
-function isSafeMediaUrl(url) {
-  if (!url || typeof url !== "string") return false;
-  try {
-    const u = new URL(url, window.location.origin);
-    return u.protocol === "https:" || u.protocol === "http:";
-  } catch {
-    return false;
-  }
 }
 
 export default function Gallery({
@@ -74,7 +64,7 @@ export default function Gallery({
                   {item.rewritten_prompt && <div className="small text-success mt-1">Промпт переписан GPT</div>}
                   {item.error_message && <div className="small text-danger mt-1">{item.error_message}</div>}
                   <div className="d-flex flex-wrap gap-1 mt-2">
-                    {item.result_url && (
+                    {item.result_url && isSafeMediaUrl(item.result_url) && (
                       <IconButton
                         className="btn btn-icon-only btn-download btn-sm"
                         title="Скачать"

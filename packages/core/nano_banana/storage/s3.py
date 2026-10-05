@@ -7,7 +7,7 @@ from __future__ import annotations
 import io
 import logging
 from datetime import timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 from minio import Minio
@@ -67,12 +67,49 @@ class MinioService:
             return None
         value = url_or_path.strip()
         if value.startswith("images/"):
-            return value.split("?", 1)[0]
-        marker = f"/{self.bucket}/"
-        if marker in value:
+            path = value.split("?", 1)[0]
+        else:
+            marker = f"/{self.bucket}/"
+            if marker not in value:
+                return None
             path = value.split(marker, 1)[1].split("?", 1)[0]
-            return path if path.startswith("images/") else None
-        return None
+            if not path.startswith("images/"):
+                return None
+        if ".." in path or path.startswith("/") or "\\" in path:
+            return None
+        return path
+
+    def get_object_bytes(
+        self,
+        url_or_path: str,
+        max_bytes: int = 25 * 1024 * 1024,
+    ) -> Tuple[bytes, str]:
+        path = self.extract_object_path(url_or_path)
+        if not path:
+            raise FileNotFoundError("object not found")
+        response = None
+        try:
+            response = self.client.get_object(self.bucket, path)
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                chunk = response.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError("object too large")
+                chunks.append(chunk)
+            content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip()
+            if content_type not in {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"}:
+                content_type = "image/jpeg"
+            return b"".join(chunks), content_type
+        except S3Error as exc:
+            raise FileNotFoundError("object not found") from exc
+        finally:
+            if response is not None:
+                response.close()
+                response.release_conn()
 
     def upload_image(self, image_data: bytes, filename: str, content_type: str = "image/jpeg") -> Dict[str, str]:
         try:
