@@ -432,19 +432,22 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertEqual(status["state"], "ok")
 
     def test_google_gemini_status_filters_active_incident(self):
+        from datetime import datetime, timedelta, timezone
+
         from nano_banana.status import google as gcs
 
+        begin = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         sample = [
             {
                 "id": "1",
                 "external_desc": "Vertex AI Gemini API customers experienced increased error rates.",
-                "begin": "2026-09-11T10:00:00+00:00",
+                "begin": begin,
                 "end": None,
             },
             {
                 "id": "2",
                 "external_desc": "Cloud Storage bucket listing delays",
-                "begin": "2026-09-11T10:00:00+00:00",
+                "begin": begin,
                 "end": None,
             },
         ]
