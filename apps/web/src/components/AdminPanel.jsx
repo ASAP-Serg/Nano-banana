@@ -5,6 +5,18 @@ import { IconToForm } from "../icons.jsx";
 import Lightbox from "./Lightbox.jsx";
 import Modal from "./Modal.jsx";
 
+function formatAgo(iso) {
+  if (!iso) return "никогда";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "никогда";
+  const days = Math.floor((Date.now() - then.getTime()) / 86400000);
+  if (days <= 0) return "сегодня";
+  if (days === 1) return "вчера";
+  if (days < 30) return `${days} дн.`;
+  const months = Math.max(1, Math.floor(days / 30));
+  return `${months} мес.`;
+}
+
 export default function AdminPanel({ onClose, onInsertToForm }) {
   const [users, setUsers] = useState([]);
   const [gens, setGens] = useState([]);
@@ -22,6 +34,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
   const [lightbox, setLightbox] = useState(null);
   const [pwModal, setPwModal] = useState(null);
   const [pwValue, setPwValue] = useState("");
+  const [idleOnly, setIdleOnly] = useState(false);
   const pageSize = 24;
 
   function askPassword(title) {
@@ -43,10 +56,10 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
     }
   }
 
-  async function load() {
+  async function load(nextIdleOnly = idleOnly) {
     try {
       const [u, o, f] = await Promise.all([
-        api.adminUsers(),
+        api.adminUsers(nextIdleOnly ? { idle_only: true } : {}),
         api.adminOverview(),
         api.adminFilters(),
       ]);
@@ -111,9 +124,36 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                 <div className="col-md-3">
                   <div className="card p-3">Расход ~ ${overview.spend_total_usd}</div>
                 </div>
+                <div className="col-md-3">
+                  <div className="card p-3">
+                    Без генераций {overview.idle_days || 60}+ дн.: {overview.idle_users ?? 0}
+                  </div>
+                </div>
               </div>
             )}
-            <h6>Пользователи</h6>
+            <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+              <h6 className="mb-0">Пользователи</h6>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id="adminIdleOnly"
+                  checked={idleOnly}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setIdleOnly(next);
+                    load(next);
+                  }}
+                />
+                <label className="form-check-label" htmlFor="adminIdleOnly">
+                  только без генераций 2+ мес.
+                </label>
+              </div>
+            </div>
+            <p className="form-text text-muted mt-0 mb-2">
+              Мёртвый — не админ и нет генераций 60+ дней (или аккаунт старше 60 дней без единой генерации). Удаление только вручную.
+            </p>
+            <div className="table-responsive">
             <table className="table table-sm">
               <thead>
                 <tr>
@@ -122,17 +162,33 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                   <th>Email</th>
                   <th>Admin</th>
                   <th>Статус</th>
+                  <th>Генерации</th>
+                  <th>Последняя генерация</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
+                {users.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="text-muted">
+                      {idleOnly ? "Нет аккаунтов без генераций 2+ месяцев." : "Нет пользователей."}
+                    </td>
+                  </tr>
+                )}
                 {users.map((u) => (
-                  <tr key={u.id}>
+                  <tr key={u.id} className={u.is_idle ? "table-warning" : undefined}>
                     <td>{u.id}</td>
                     <td>{u.username}</td>
                     <td>{u.email}</td>
                     <td>{u.is_admin ? "да" : "нет"}</td>
                     <td>{u.is_active === false ? "выкл" : "активен"}</td>
+                    <td>{u.generation_count ?? 0}</td>
+                    <td>
+                      <span title={u.last_generated_at || ""}>{formatAgo(u.last_generated_at)}</span>
+                      {u.is_idle && (
+                        <span className="badge text-bg-warning ms-2">2+ мес.</span>
+                      )}
+                    </td>
                     <td>
                       <div className="d-flex flex-wrap gap-1">
                         {u.is_admin ? (
@@ -180,6 +236,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                 ))}
               </tbody>
             </table>
+            </div>
             <h6 className="mt-4">Генерации</h6>
             <div className="row g-2 mb-3">
               <div className="col-md-3">

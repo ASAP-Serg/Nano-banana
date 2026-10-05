@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import or_, func
+from sqlalchemy import and_, or_, func
 
 from nano_banana.db.models import Generation, User, AdminAuditLog
 from nano_banana.tokens import TokenPayload
@@ -15,11 +15,24 @@ from nano_banana.db.session import db_service
 from nano_banana.config import settings
 from nano_banana.rate_limit import check_rate_limit
 from nano_banana.schemas import AdminPasswordRequest
+from nano_banana.idle import IDLE_GENERATION_DAYS, is_generation_idle
 from nano_banana.storage.media import client_reference_urls, client_result_url
 from nano_banana.storage.s3 import MinioService
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 _minio: Optional[MinioService] = None
+
+
+def _generation_stats_subquery(session):
+    return (
+        session.query(
+            Generation.user_id.label("user_id"),
+            func.max(Generation.created_at).label("last_generated_at"),
+            func.count(Generation.id).label("generation_count"),
+        )
+        .group_by(Generation.user_id)
+        .subquery()
+    )
 
 
 def _storage() -> MinioService:
@@ -143,16 +156,30 @@ def _estimate_cost_usd(gen: Generation) -> float:
 async def admin_list_users(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
     search: Optional[str] = None,
+    idle_only: bool = Query(False),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
     _require_admin(user)
     _rate_limit_admin_read(user.user_id, "users")
+    now = datetime.utcnow()
+    idle_cutoff = now - timedelta(days=IDLE_GENERATION_DAYS)
     with db_service.get_session() as session:
-        query = session.query(User)
+        stats = _generation_stats_subquery(session)
+        query = (
+            session.query(User, stats.c.last_generated_at, stats.c.generation_count)
+            .outerjoin(stats, User.id == stats.c.user_id)
+        )
         if search:
             needle = f"%{search.strip()}%"
             query = query.filter(or_(User.username.ilike(needle), User.email.ilike(needle)))
+        if idle_only:
+            query = query.filter(User.is_admin.is_(False)).filter(
+                or_(
+                    and_(stats.c.last_generated_at.is_(None), User.created_at <= idle_cutoff),
+                    stats.c.last_generated_at <= idle_cutoff,
+                )
+            )
         total = query.count()
         rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
 
@@ -167,10 +194,19 @@ async def admin_list_users(
                     "totp_enabled": bool(getattr(u, "totp_enabled", False)),
                     "created_at": u.created_at.isoformat() if u.created_at else None,
                     "last_login": u.last_login.isoformat() if u.last_login else None,
+                    "last_generated_at": last_generated_at.isoformat() if last_generated_at else None,
+                    "generation_count": int(generation_count or 0),
+                    "is_idle": (not bool(u.is_admin))
+                    and is_generation_idle(u.created_at, last_generated_at, now=now),
                 }
-                for u in rows
+                for u, last_generated_at, generation_count in rows
             ],
-            "meta": {"total": total, "limit": limit, "offset": offset},
+            "meta": {
+                "total": total,
+                "limit": limit,
+                "offset": offset,
+                "idle_days": IDLE_GENERATION_DAYS,
+            },
         }
 
 
@@ -484,6 +520,20 @@ async def admin_overview(
             .filter(User.last_login >= cutoff)
             .count()
         )
+        idle_cutoff = datetime.utcnow() - timedelta(days=IDLE_GENERATION_DAYS)
+        stats = _generation_stats_subquery(session)
+        idle_users = (
+            session.query(User)
+            .outerjoin(stats, User.id == stats.c.user_id)
+            .filter(User.is_admin.is_(False))
+            .filter(
+                or_(
+                    and_(stats.c.last_generated_at.is_(None), User.created_at <= idle_cutoff),
+                    stats.c.last_generated_at <= idle_cutoff,
+                )
+            )
+            .count()
+        )
 
         gens_query = session.query(Generation).filter(Generation.created_at >= cutoff)
         if user_id is not None:
@@ -541,6 +591,8 @@ async def admin_overview(
             "user_id": user_id,
             "users_total": users_total,
             "active_users": active_users,
+            "idle_users": idle_users,
+            "idle_days": IDLE_GENERATION_DAYS,
             "generations_total": generations_total,
             "completed_total": completed_total,
             "failed_total": failed_total,

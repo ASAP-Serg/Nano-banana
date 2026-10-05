@@ -468,6 +468,46 @@ class TestMediumHardening(unittest.TestCase):
         self.assertIn("download_image_from_url", moonez)
 
 
+class TestIdleAccounts(unittest.TestCase):
+    def test_never_generated_recent_is_not_idle(self):
+        from datetime import datetime, timedelta
+
+        from nano_banana.idle import is_generation_idle
+
+        now = datetime(2026, 10, 5)
+        created = now - timedelta(days=10)
+        self.assertFalse(is_generation_idle(created, None, now=now))
+
+    def test_never_generated_old_is_idle(self):
+        from datetime import datetime, timedelta
+
+        from nano_banana.idle import is_generation_idle
+
+        now = datetime(2026, 10, 5)
+        created = now - timedelta(days=61)
+        self.assertTrue(is_generation_idle(created, None, now=now))
+
+    def test_recent_generation_is_not_idle(self):
+        from datetime import datetime, timedelta
+
+        from nano_banana.idle import is_generation_idle
+
+        now = datetime(2026, 10, 5)
+        created = now - timedelta(days=200)
+        last = now - timedelta(days=3)
+        self.assertFalse(is_generation_idle(created, last, now=now))
+
+    def test_old_generation_is_idle(self):
+        from datetime import datetime, timedelta
+
+        from nano_banana.idle import is_generation_idle
+
+        now = datetime(2026, 10, 5)
+        created = now - timedelta(days=200)
+        last = now - timedelta(days=61)
+        self.assertTrue(is_generation_idle(created, last, now=now))
+
+
 class TestTotpQrIsLocal(unittest.TestCase):
     def test_otpauth_becomes_png_data_url(self):
         from nano_banana.totp_qr import otpauth_qr_data_url

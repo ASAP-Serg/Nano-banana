@@ -70,7 +70,14 @@ export const api = {
   getKeys: () => request("/users/api-key"),
   setKey: (api_key, provider) => request("/users/api-key", { method: "PUT", body: { api_key, provider } }),
   deleteKeys: () => request("/users/api-key", { method: "DELETE" }),
-  adminUsers: () => request("/admin/users"),
+  adminUsers: (params = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") q.set(k, v);
+    });
+    const qs = q.toString();
+    return request(`/admin/users${qs ? `?${qs}` : ""}`);
+  },
   adminFilters: () => request("/admin/filters"),
   adminOverview: (period_days = 30) => request(`/admin/overview?period_days=${period_days}`),
   adminGenerations: (params = {}) => {
