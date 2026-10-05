@@ -344,3 +344,18 @@ class TestResidualRemoteSurface(unittest.TestCase):
         self.assertIn('credentials: "include"', text)
         self.assertIn("/api/v1/images/", text)
 
+
+class TestTotpQrIsLocal(unittest.TestCase):
+    def test_otpauth_becomes_png_data_url(self):
+        from nano_banana.totp_qr import otpauth_qr_data_url
+
+        url = otpauth_qr_data_url("otpauth://totp/Nano%20Banana:serg?secret=JBSWY3DPEHPK3PXP&issuer=Nano%20Banana")
+        self.assertTrue(url.startswith("data:image/png;base64,"))
+        self.assertGreater(len(url), 800)
+
+    def test_rejects_non_otpauth(self):
+        from nano_banana.totp_qr import otpauth_qr_data_url
+
+        with self.assertRaises(ValueError):
+            otpauth_qr_data_url("https://chart.googleapis.com/evil")
+

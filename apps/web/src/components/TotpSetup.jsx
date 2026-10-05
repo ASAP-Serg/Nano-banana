@@ -6,6 +6,7 @@ import Modal from "./Modal.jsx";
 export default function TotpSetup({ onClose, onEnabled }) {
   const [secret, setSecret] = useState("");
   const [otpauth, setOtpauth] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -17,6 +18,7 @@ export default function TotpSetup({ onClose, onEnabled }) {
         if (cancelled) return;
         setSecret(data.secret || "");
         setOtpauth(data.otpauth_url || "");
+        setQrDataUrl(data.qr_data_url || "");
       } catch (err) {
         if (cancelled) return;
         toast(err.message, "error");
@@ -54,25 +56,43 @@ export default function TotpSetup({ onClose, onEnabled }) {
   return (
     <Modal title="Двухфакторная аутентификация" onClose={onClose}>
       <p className="small text-muted">
-        Добавьте аккаунт в приложении-аутентификаторе (Google Authenticator, Authy и т.п.) по ключу ниже,
-        затем введите код из 6 цифр. Без этого админка недоступна.
+        Сканируйте QR в Google Authenticator, Authy или другом приложении, затем введите код из 6 цифр.
+        Без этого админка недоступна.
       </p>
       {secret ? (
         <>
-          <label className="form-label small">Секрет</label>
-          <div className="input-group mb-2">
-            <input className="form-control font-monospace" readOnly value={secret} />
-            <button type="button" className="btn btn-outline-secondary" onClick={() => copy(secret, "Секрет")}>
-              Копировать
-            </button>
-          </div>
-          <label className="form-label small">otpauth ссылка</label>
-          <div className="input-group mb-3">
-            <input className="form-control font-monospace small" readOnly value={otpauth} />
-            <button type="button" className="btn btn-outline-secondary" onClick={() => copy(otpauth, "Ссылка")}>
-              Копировать
-            </button>
-          </div>
+          {qrDataUrl ? (
+            <div className="text-center mb-3">
+              <img
+                src={qrDataUrl}
+                alt="QR для настройки 2FA"
+                width={240}
+                height={240}
+                style={{ background: "#fff", borderRadius: 8, padding: 8 }}
+              />
+            </div>
+          ) : (
+            <div className="text-center py-2 small text-muted">QR недоступен — используйте ключ ниже</div>
+          )}
+          <details className="mb-3">
+            <summary className="small text-muted" style={{ cursor: "pointer" }}>
+              Не сканируется? Показать ключ
+            </summary>
+            <label className="form-label small mt-2">Секрет</label>
+            <div className="input-group mb-2">
+              <input className="form-control font-monospace" readOnly value={secret} />
+              <button type="button" className="btn btn-outline-secondary" onClick={() => copy(secret, "Секрет")}>
+                Копировать
+              </button>
+            </div>
+            <label className="form-label small">otpauth ссылка</label>
+            <div className="input-group">
+              <input className="form-control font-monospace small" readOnly value={otpauth} />
+              <button type="button" className="btn btn-outline-secondary" onClick={() => copy(otpauth, "Ссылка")}>
+                Копировать
+              </button>
+            </div>
+          </details>
           <form onSubmit={onSubmit}>
             <input
               className="form-control mb-2"

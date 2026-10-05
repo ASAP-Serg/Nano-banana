@@ -16,6 +16,7 @@ from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import TotpConfirmRequest, UserCreateRequest, UserLoginRequest, UserResponse
 from nano_banana.security import constant_time_secret_equal
 from nano_banana.tokens import Token, TokenPayload
+from nano_banana.totp_qr import otpauth_qr_data_url
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -210,7 +211,11 @@ async def totp_begin(
         db_user.totp_secret = CryptoService.encrypt(secret)
         session.commit()
         uri = pyotp.TOTP(secret).provisioning_uri(name=db_user.username, issuer_name="Nano Banana")
-        return {"otpauth_url": uri, "secret": secret}
+        return {
+            "otpauth_url": uri,
+            "secret": secret,
+            "qr_data_url": otpauth_qr_data_url(uri),
+        }
 
 
 @router.post("/totp/confirm")
