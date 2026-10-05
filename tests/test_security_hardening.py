@@ -304,7 +304,7 @@ class TestResidualRemoteSurface(unittest.TestCase):
         auth_core = (root / "packages" / "core" / "nano_banana" / "auth.py").read_text(encoding="utf-8")
         self.assertIn('samesite="strict"', auth_router)
         self.assertNotIn('samesite="lax"', auth_router)
-        self.assertIn("TOTP_REQUIRED", auth_router)
+        self.assertNotIn("TOTP_REQUIRED", auth_router)
         self.assertIn("DUMMY_PASSWORD_HASH", auth_core)
         self.assertNotIn('"is_admin": user_data.is_admin', auth_core)
         self.assertNotIn('"email": user_data.email', auth_core)
@@ -342,7 +342,130 @@ class TestResidualRemoteSurface(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("export function isSafeMediaUrl", text)
         self.assertIn('credentials: "include"', text)
-        self.assertIn("/api/v1/images/", text)
+        self.assertIn("/api/v1/images/", text.replace("\\/", "/"))
+        self.assertIn("file|reference", text)
+
+
+class TestMediumHardening(unittest.TestCase):
+    def test_unknown_model_rejected(self):
+        from pydantic import ValidationError
+
+        from nano_banana.schemas import ImageGenerationRequest
+
+        body = ImageGenerationRequest(prompt="cat", model_name="nano-banana-pro")
+        self.assertEqual(body.model_name, "nano-banana-pro")
+        with self.assertRaises(ValidationError):
+            ImageGenerationRequest(prompt="cat", model_name="google/flux-pro")
+
+    def test_replicate_slug_no_passthrough(self):
+        from nano_banana.providers.models import get_model_providers, replicate_slug
+
+        self.assertEqual(replicate_slug("nano-banana-pro-r8"), "google/nano-banana-pro")
+        self.assertIsNone(replicate_slug("google/flux-pro"))
+        self.assertIsNone(replicate_slug("nano-banana-pro"))
+        self.assertEqual(get_model_providers("google/flux-pro"), [])
+        self.assertEqual(get_model_providers("nano-banana-pro"), ["bananalab"])
+
+    def test_open_cloud_suffixes_blocked(self):
+        from nano_banana.config import Settings
+        from nano_banana.security import is_safe_outbound_image_url
+
+        s = Settings(
+            SECRET_KEY="x" * 64,
+            POSTGRES_PASSWORD="test-strong-postgres-password",
+            MINIO_ACCESS_KEY="testminioaccess12",
+            MINIO_SECRET_KEY="test-strong-minio-secret-key",
+            MINIO_PUBLIC_URL="https://storage.example.com",
+            MINIO_BUCKET="nano-banana-images",
+            API_URL="https://app.example.com",
+            DATA_ENCRYPTION_KEY="y" * 64,
+            REDIS_PASSWORD="test-redis-password-not-weak-xx",
+        )
+        self.assertFalse(is_safe_outbound_image_url("https://evil.r2.dev/img.jpg", s))
+        self.assertFalse(is_safe_outbound_image_url("https://bucket.s3.amazonaws.com/img.jpg", s))
+        self.assertFalse(is_safe_outbound_image_url("https://app.example.com/nano-banana-images/images/x.jpg", s))
+        self.assertTrue(
+            is_safe_outbound_image_url(
+                "https://storage.example.com/nano-banana-images/images/results/a.jpg", s
+            )
+        )
+        self.assertTrue(is_safe_outbound_image_url("https://pbxt.replicate.delivery/x.jpg", s))
+
+    def test_materialize_rejects_foreign_object_path(self):
+        from nano_banana.generation.references import materialize_reference_images
+
+        class FakeMinio:
+            def __init__(self):
+                self.reads = []
+
+            def extract_object_path(self, url_or_path):
+                value = (url_or_path or "").strip()
+                if value.startswith("images/") and ".." not in value:
+                    return value.split("?", 1)[0]
+                return None
+
+            def get_object_bytes(self, path):
+                self.reads.append(path)
+                return b"x" * 600, "image/jpeg"
+
+        minio = FakeMinio()
+        with self.assertRaises(ValueError):
+            materialize_reference_images(
+                minio,
+                ["images/other/secret.jpg"],
+                allowed_sources=["images/mine/ref.jpg"],
+            )
+        self.assertEqual(minio.reads, [])
+        out = materialize_reference_images(
+            minio,
+            ["images/mine/ref.jpg"],
+            allowed_sources=["images/mine/ref.jpg"],
+        )
+        self.assertEqual(len(out), 1)
+        self.assertTrue(out[0].startswith("data:image/jpeg;base64,"))
+        self.assertEqual(minio.reads, ["images/mine/ref.jpg"])
+
+    def test_register_rate_limit_before_bootstrap_403(self):
+        from pathlib import Path
+
+        auth_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "auth.py"
+        ).read_text(encoding="utf-8")
+        self.assertLess(
+            auth_router.find("check_rate_limit"),
+            auth_router.find("Регистрация отключена"),
+        )
+
+    def test_nginx_forwards_client_ip_and_k8s_csp(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        compose = (root / "deploy" / "nginx" / "web.compose.conf").read_text(encoding="utf-8")
+        k8s = (root / "deploy" / "nginx" / "web.conf").read_text(encoding="utf-8")
+        self.assertIn("map $http_x_real_ip $nb_client_ip", compose)
+        api_block = compose.split("location /api/")[1].split("location ")[0]
+        self.assertIn("X-Real-IP $nb_client_ip", api_block)
+        self.assertNotIn("X-Real-IP $remote_addr", api_block)
+        self.assertIn("Content-Security-Policy", k8s)
+
+    def test_providers_use_capped_download(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        replicate = (root / "packages" / "core" / "nano_banana" / "providers" / "replicate.py").read_text(
+            encoding="utf-8"
+        )
+        moonez = (root / "packages" / "core" / "nano_banana" / "providers" / "moonez.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("requests.get(", replicate)
+        self.assertIn("download_image_from_url", replicate)
+        self.assertIn("download_image_from_url", moonez)
 
 
 class TestTotpQrIsLocal(unittest.TestCase):

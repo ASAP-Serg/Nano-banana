@@ -18,13 +18,17 @@ export function isSafeMediaUrl(url) {
   try {
     const parsed = new URL(value, window.location.origin);
     if (parsed.origin !== window.location.origin) return false;
-    return parsed.pathname.startsWith("/api/v1/images/");
+    return /^\/api\/v1\/images\/\d+\/(file|reference\/\d+)\/?$/.test(parsed.pathname);
   } catch {
     return false;
   }
 }
 
 export async function downloadImage(imageUrl, prompt) {
+  if (!isSafeMediaUrl(imageUrl)) {
+    toast("Некорректная ссылка на изображение", "error");
+    return;
+  }
   try {
     const response = await fetch(imageUrl, { credentials: "include" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -45,8 +49,7 @@ export async function downloadImage(imageUrl, prompt) {
     window.URL.revokeObjectURL(url);
     toast("Изображение скачано");
   } catch (err) {
-    window.open(imageUrl, "_blank", "noopener,noreferrer");
-    toast(err.message || "Открыли изображение в новой вкладке", "error");
+    toast(err.message || "Не удалось скачать изображение", "error");
   }
 }
 

@@ -21,7 +21,6 @@ export default function App() {
   const [showKeys, setShowKeys] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTotp, setShowTotp] = useState(false);
-  const [needTotp, setNeedTotp] = useState(false);
   const [status, setStatus] = useState(null);
   const [models, setModels] = useState({});
   const [defaultModel, setDefaultModel] = useState("nano-banana-pro");
@@ -125,16 +124,10 @@ export default function App() {
     try {
       await api.login(form.get("username"), form.get("password"), form.get("totp"));
       clearLegacyToken();
-      setNeedTotp(false);
       setShowLogin(false);
       await loadMe();
       toast("Вход выполнен");
     } catch (err) {
-      if (err.message === "TOTP_REQUIRED") {
-        setNeedTotp(true);
-        toast("Введите код из приложения-аутентификатора");
-        return;
-      }
       toast(err.message, "error");
     }
   }
@@ -286,15 +279,10 @@ export default function App() {
       <AuthModals
         showLogin={showLogin}
         showRegister={showRegister}
-        needTotp={needTotp}
-        onCloseLogin={() => {
-          setShowLogin(false);
-          setNeedTotp(false);
-        }}
+        onCloseLogin={() => setShowLogin(false)}
         onCloseRegister={() => setShowRegister(false)}
         onOpenRegister={() => {
           setShowLogin(false);
-          setNeedTotp(false);
           setShowRegister(true);
         }}
         onLogin={onLogin}

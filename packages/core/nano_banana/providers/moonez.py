@@ -305,12 +305,10 @@ class BananalabService:
                 fallback_b64: List[str] = []
                 for idx, img_url in enumerate(input_url_list, 1):
                     try:
-                        from nano_banana.config import settings as app_settings
-                        from nano_banana.security import assert_safe_outbound_image_url
-                        assert_safe_outbound_image_url(img_url, app_settings)
-                        r = requests.get(img_url, timeout=30, allow_redirects=False)
-                        if r.status_code == 200:
-                            img_data = _optimize_image_for_api(r.content, idx)
+                        from nano_banana.storage.results import download_image_from_url
+                        img_bytes = download_image_from_url(img_url, read_timeout=30, retries=2)
+                        if img_bytes:
+                            img_data = _optimize_image_for_api(img_bytes, idx)
                             fallback_b64.append(base64.b64encode(img_data).decode("ascii"))
                     except Exception as e:
                         logger.warning("[BANANALAB] fallback URL->base64 не удался для ref %s: %s", idx, e)

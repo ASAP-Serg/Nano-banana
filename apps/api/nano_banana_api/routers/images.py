@@ -16,7 +16,7 @@ from nano_banana.generation.cleanup import cleanup_old_generations
 from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
 from nano_banana.generation.processor import MAX_GENERATION_RETRIES, get_fallback_model, rewrite_metadata_fields
 from nano_banana.generation.references import store_reference_images
-from nano_banana.providers.models import DEFAULT_MODEL_ID, MODEL_REGISTRY, get_provider_for_model, models_available_with_keys
+from nano_banana.providers.models import DEFAULT_MODEL_ID, MODEL_REGISTRY, get_model_entry, get_provider_for_model, models_available_with_keys
 from nano_banana.queue.jobs import get_job_queue
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import ImageGenerationRequest, ImageGenerationResponse, ImageResponse
@@ -47,7 +47,7 @@ def _queue_payload(body: ImageGenerationRequest, reference_image_urls: List[str]
         "guidance_scale": body.guidance_scale,
         "num_inference_steps": body.num_inference_steps,
         "seed": body.seed,
-        "model_name": body.model_name,
+        "model_name": body.model_name or DEFAULT_MODEL_ID,
         "rewrite_prompt": bool(body.rewrite_prompt),
         "reference_images": reference_image_urls,
     }
@@ -75,6 +75,8 @@ async def generate_image(
     )
     try:
         selected_model = body.model_name if body.model_name else DEFAULT_MODEL_ID
+        if not get_model_entry(selected_model):
+            raise HTTPException(status_code=400, detail="Неизвестная модель")
         keys = load_user_api_keys(user.user_id)
         model_provider = get_provider_for_model(selected_model, keys)
         if not model_provider:
@@ -82,7 +84,7 @@ async def generate_image(
                 status_code=400,
                 detail=f"Для модели «{selected_model}» нет подходящего API ключа. Добавьте ключ в настройках.",
             )
-        select_key_for_model(user.user_id, body.model_name)
+        select_key_for_model(user.user_id, selected_model)
 
         with db_service.get_session() as session:
             active_count = (

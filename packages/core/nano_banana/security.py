@@ -14,10 +14,7 @@ if TYPE_CHECKING:
 _DEFAULT_OUTBOUND_IMAGE_HOST_SUFFIXES = (
     "replicate.delivery",
     "replicate.com",
-    "pbxt.replicate.delivery",
     "moonez.ai",
-    "r2.dev",
-    "amazonaws.com",
     "googleusercontent.com",
     "storage.googleapis.com",
 )
@@ -42,11 +39,11 @@ def _host_aliases(netloc: str) -> set[str]:
     return aliases
 
 
-def _public_url_hosts(settings: "Settings") -> set[str]:
+def _storage_url_hosts(settings: "Settings") -> set[str]:
+    """Только MinIO / явно разрешённые хосты хранилища — не API_URL."""
     hosts: set[str] = set()
-    for raw in (settings.MINIO_PUBLIC_URL, getattr(settings, "API_URL", "")):
-        if not raw:
-            continue
+    raw = getattr(settings, "MINIO_PUBLIC_URL", "") or ""
+    if raw.strip():
         parsed = urlparse(raw.strip())
         if parsed.netloc:
             hosts.update(_host_aliases(parsed.netloc))
@@ -56,6 +53,10 @@ def _public_url_hosts(settings: "Settings") -> set[str]:
         if part:
             hosts.update(_host_aliases(part))
     return hosts
+
+
+def _public_url_hosts(settings: "Settings") -> set[str]:
+    return _storage_url_hosts(settings)
 
 
 def is_allowed_reference_url(url: str, settings: "Settings") -> bool:

@@ -14,7 +14,6 @@ from nano_banana.error_log import save_error_to_file
 from nano_banana.generation import runtime
 from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
 from nano_banana.generation.references import materialize_reference_images
-from nano_banana.providers.detect import infer_image_api_provider
 from nano_banana.providers.errors import (
     BANANALAB_EMPTY_DONE_RETRY_MESSAGE,
     BANANALAB_UPSTREAM_NO_IMAGE_EXHAUSTED_MESSAGE,
@@ -28,7 +27,7 @@ from nano_banana.providers.errors import (
     is_policy_block_error,
     upstream_no_image_retry_delay_seconds,
 )
-from nano_banana.providers.models import get_provider_for_model, provider_label
+from nano_banana.providers.models import get_model_entry, get_provider_for_model, provider_label
 from nano_banana.providers.moonez import BananalabService, SUPPORTED_BANANALAB_FRONTEND_MODELS
 from nano_banana.providers.openrouter import OpenRouterService
 from nano_banana.providers.replicate import ReplicateService
@@ -177,9 +176,17 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
             session.commit()
             queue.refresh_lock(generation_id)
 
-            api_key = select_key_for_model(generation.user_id, request_data.get("model_name") or generation.model_name)
+            model_name = request_data.get("model_name") or generation.model_name or "nano-banana-pro"
+            if not get_model_entry(model_name):
+                _fail(generation, session, "Неизвестная модель")
+                return
+
+            api_key = select_key_for_model(generation.user_id, model_name)
             keys = load_user_api_keys(generation.user_id)
-            provider = get_provider_for_model(request_data.get("model_name"), keys) or infer_image_api_provider(api_key)
+            provider = get_provider_for_model(model_name, keys)
+            if not provider:
+                _fail(generation, session, "Нет API ключа для этой модели")
+                return
             provider_label_text = provider_label(provider)
 
             try:
@@ -194,7 +201,6 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 _fail(generation, session, f"Ошибка инициализации клиента ({provider_label_text})")
                 return
 
-            model_name = request_data.get("model_name") or generation.model_name or "nano-banana-pro"
             if provider == "bananalab" and model_name not in SUPPORTED_BANANALAB_FRONTEND_MODELS:
                 logger.warning("[GENERATION] unsupported Moonez model '%s' ignored by API", model_name)
 
@@ -206,9 +212,15 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
             result = None
             last_raw_error = ""
             try:
+                meta = generation.generation_metadata or {}
+                allowed_sources = list(meta.get("reference_image_urls") or [])
+                src_path = getattr(generation, "result_path", None) or generation.result_url
+                if src_path:
+                    allowed_sources.append(src_path)
                 provider_refs = materialize_reference_images(
                     get_storage(),
                     request_data.get("reference_images") or [],
+                    allowed_sources=allowed_sources,
                 )
             except Exception:
                 logger.exception("[GENERATION] reference materialize failed gen=%s", generation_id)

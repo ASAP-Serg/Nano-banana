@@ -2,7 +2,6 @@
 Сервис для работы с Replicate API (Nano Banana Pro)
 """
 import replicate
-import requests
 import io
 import logging
 from typing import Optional, List, Dict, Any
@@ -227,10 +226,13 @@ class ReplicateService:
                 current_model_key = model_name
                 logger.info(f"[REPLICATE] Используется модель: {model_name} ({selected_model})")
             elif model_name:
-                # Если указана модель, которой нет в списке, пробуем использовать как есть (для кастомных моделей)
-                selected_model = model_name
-                current_model_key = model_name
-                logger.warning(f"[REPLICATE] Модель '{model_name}' не найдена в списке доступных, используется как есть")
+                logger.error("[REPLICATE] Модель '%s' не в реестре, отказ", model_name)
+                return {
+                    "success": False,
+                    "image_url": None,
+                    "image_data": None,
+                    "error": f"Модель '{model_name}' недоступна через Replicate",
+                }
             else:
                 selected_model = self.AVAILABLE_MODELS[self.DEFAULT_MODEL]["name"]
                 current_model_key = self.DEFAULT_MODEL
@@ -283,25 +285,16 @@ class ReplicateService:
                                 processed_images.append(io.BytesIO(img_data))
                                 logger.debug(f"[REPLICATE] Референс {idx}: обработан base64 изображение")
                             elif img.startswith(('http://', 'https://')):
-                                # URL изображение - загружаем и оптимизируем
-                                from nano_banana.config import settings as app_settings
-                                from nano_banana.security import assert_safe_outbound_image_url
-                                assert_safe_outbound_image_url(img, app_settings)
-                                img_response = requests.get(img, timeout=30, allow_redirects=False)
-                                if img_response.status_code == 200:
-                                    img_data = img_response.content
-                                    
-                                    # Оптимизируем изображение для Nano Banana Pro API (если нужно)
+                                from nano_banana.storage.results import download_image_from_url
+                                img_data = download_image_from_url(img, read_timeout=30, retries=2)
+                                if img_data:
                                     img_data = self._optimize_image_for_api(img_data, idx)
-                                    
                                     processed_images.append(io.BytesIO(img_data))
                                     logger.debug(f"[REPLICATE] Референс {idx}: загружен с URL и оптимизирован")
                                 else:
-                                    logger.warning(f"[REPLICATE] Референс {idx}: не удалось загрузить с URL (статус {img_response.status_code})")
+                                    logger.warning(f"[REPLICATE] Референс {idx}: не удалось загрузить с URL")
                             else:
-                                # Прямой путь к файлу
-                                processed_images.append(img)
-                                logger.debug(f"[REPLICATE] Референс {idx}: используется файл")
+                                logger.warning(f"[REPLICATE] Референс {idx}: пропущен неподдерживаемый формат")
                         elif hasattr(img, 'read'):
                             # Если это файлоподобный объект
                             img.seek(0)
@@ -551,12 +544,9 @@ class ReplicateService:
             if result_url and not result_data:
                 try:
                     logger.info(f"[REPLICATE] Загрузка изображения по URL: {result_url[:100]}...")
-                    from nano_banana.config import settings as app_settings
-                    from nano_banana.security import assert_safe_outbound_image_url
-                    assert_safe_outbound_image_url(result_url, app_settings)
-                    img_response = requests.get(result_url, timeout=30, allow_redirects=False)
-                    if img_response.status_code == 200:
-                        result_data = img_response.content
+                    from nano_banana.storage.results import download_image_from_url
+                    result_data = download_image_from_url(result_url, read_timeout=30, retries=2)
+                    if result_data:
                         logger.info(f"[REPLICATE] Изображение загружено, размер: {len(result_data)} байт")
                         
                         # Проверяем что это валидное изображение

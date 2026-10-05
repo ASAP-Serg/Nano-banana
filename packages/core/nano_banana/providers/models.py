@@ -177,8 +177,8 @@ def list_model_ids() -> List[str]:
 def get_model_providers(model_id: Optional[str]) -> List[ImageApiProvider]:
     entry = get_model_entry(model_id)
     if not entry:
-        return ["replicate"]
-    return list(entry.get("provider_priority") or entry.get("providers") or ["replicate"])
+        return []
+    return list(entry.get("provider_priority") or entry.get("providers") or [])
 
 
 def get_provider_for_model(model_id: Optional[str], keys: Dict[str, str]) -> Optional[ImageApiProvider]:
@@ -233,8 +233,9 @@ def openrouter_slug(model_id: Optional[str]) -> Optional[str]:
 def replicate_slug(model_id: Optional[str]) -> Optional[str]:
     entry = get_model_entry(model_id)
     if not entry:
-        return model_id
-    return entry.get("replicate_slug") or model_id
+        return None
+    slug = entry.get("replicate_slug")
+    return str(slug) if slug else None
 
 
 def replicate_params_key(model_id: Optional[str]) -> str:

@@ -132,8 +132,19 @@ def store_reference_images(minio: MinioService, reference_images: List[str], use
     return urls
 
 
-def materialize_reference_images(minio: MinioService, reference_images: List[str]) -> List[str]:
-    """Пути MinIO / старые URL → data URL для провайдера. Без исходящих запросов на чужие хосты."""
+def materialize_reference_images(
+    minio: MinioService,
+    reference_images: List[str],
+    allowed_sources: Optional[List[str]] = None,
+) -> List[str]:
+    """Пути MinIO этой генерации → data URL. Чужие object key не читаем."""
+    allowed: set[str] = set()
+    for src in allowed_sources or []:
+        if not isinstance(src, str):
+            continue
+        path = minio.extract_object_path(src)
+        if path:
+            allowed.add(path)
     out: List[str] = []
     for ref in reference_images or []:
         if not isinstance(ref, str) or not ref.strip():
@@ -142,7 +153,10 @@ def materialize_reference_images(minio: MinioService, reference_images: List[str
         if text.startswith("data:image"):
             out.append(text)
             continue
-        data, content_type = minio.get_object_bytes(text)
+        path = minio.extract_object_path(text)
+        if not path or path not in allowed:
+            raise ValueError("Референс недоступен")
+        data, content_type = minio.get_object_bytes(path)
         encoded = base64.b64encode(data).decode("ascii")
         out.append(f"data:{content_type};base64,{encoded}")
     return out

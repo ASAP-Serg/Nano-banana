@@ -75,6 +75,13 @@ async def register(
     response: Response,
     x_admin_bootstrap_secret: Annotated[Optional[str], Header()] = None,
 ):
+    check_rate_limit(
+        "register",
+        client_ip_from_request(request),
+        settings.SECURITY_REGISTER_MAX_ATTEMPTS,
+        settings.SECURITY_REGISTER_WINDOW_SECONDS,
+        "Слишком много попыток регистрации с этого адреса. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         users_count = session.query(User).count()
 
@@ -86,13 +93,6 @@ async def register(
                 detail="Регистрация отключена. Обратитесь к администратору.",
             )
 
-    check_rate_limit(
-        "register",
-        client_ip_from_request(request),
-        settings.SECURITY_REGISTER_MAX_ATTEMPTS,
-        settings.SECURITY_REGISTER_WINDOW_SECONDS,
-        "Слишком много попыток регистрации с этого адреса. Попробуйте позже.",
-    )
     hashed_password = auth_service.get_password_hash(user_data.password)
     with db_service.get_session() as session:
         users_count = session.query(User).count()
@@ -160,10 +160,10 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         if not user or not password_ok or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
         if getattr(user, "totp_enabled", False):
-            if not user_data.totp_code:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TOTP_REQUIRED")
             secret = CryptoService.decrypt(user.totp_secret or "")
-            totp_ok = bool(secret) and pyotp.TOTP(secret).verify(user_data.totp_code, valid_window=1)
+            totp_ok = bool(secret) and bool(user_data.totp_code) and pyotp.TOTP(secret).verify(
+                user_data.totp_code, valid_window=1
+            )
             if not totp_ok:
                 raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
         user.last_login = datetime.utcnow()

@@ -211,7 +211,12 @@ class ImageGenerationRequest(BaseModel):
             return None
         if len(name) > MAX_MODEL_NAME_LENGTH or "<" in name or ">" in name:
             raise ValueError("Некорректное имя модели")
-        return name
+        from nano_banana.providers.models import get_model_entry
+
+        key = name.lower()
+        if get_model_entry(key) is None:
+            raise ValueError("Неизвестная модель")
+        return key
 
     @field_validator("reference_images")
     @classmethod
