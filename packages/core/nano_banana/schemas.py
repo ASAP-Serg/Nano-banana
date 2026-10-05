@@ -1,15 +1,37 @@
 """
 Схемы данных для Nano Banana Pro API
 """
+import re
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List
 from datetime import datetime
+
+_USERNAME_RE = re.compile(r"^[\w.-]{3,32}$", re.UNICODE)
+
+
+def normalize_username(value: str) -> str:
+    name = (value or "").strip()
+    if (
+        not _USERNAME_RE.fullmatch(name)
+        or name[0] in ".-_"
+        or name[-1] in ".-"
+        or "<" in name
+        or ">" in name
+    ):
+        raise ValueError("Имя: 3–32 символа, буквы и цифры, внутри можно . _ -")
+    return name
+
 
 # Аутентификация
 class UserCreateRequest(BaseModel):
     username: str
     email: EmailStr
     password: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        return normalize_username(v)
     
     @field_validator('password')
     @classmethod

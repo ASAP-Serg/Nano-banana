@@ -122,3 +122,24 @@ class TestRateLimitFailClosed(unittest.TestCase):
             with self.assertRaises(HTTPException) as ctx:
                 check_rate_limit("login-ip", "1.2.3.4", 10, 300)
         self.assertEqual(ctx.exception.status_code, 503)
+
+
+class TestUsernameRules(unittest.TestCase):
+    def test_plain_and_cyrillic_ok(self):
+        from nano_banana.schemas import UserCreateRequest
+
+        for name in ("serg", "nomad", "Анастасия", "nano_banana"):
+            user = UserCreateRequest(username=name, email="user@example.com", password="1234567890")
+            self.assertEqual(user.username, name)
+
+    def test_html_payload_rejected(self):
+        from pydantic import ValidationError
+
+        from nano_banana.schemas import UserCreateRequest
+
+        with self.assertRaises(ValidationError):
+            UserCreateRequest(
+                username="<img src=x onerror=1>",
+                email="user@example.com",
+                password="1234567890",
+            )
