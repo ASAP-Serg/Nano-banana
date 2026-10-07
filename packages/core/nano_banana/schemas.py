@@ -257,6 +257,10 @@ class ImageResponse(BaseModel):
     rewrite_model: Optional[str] = None
     rewrite_error: Optional[str] = None
     policy_gpt_attempts: Optional[List[dict]] = None
+    provider_job_id: Optional[str] = None
+    provider_model: Optional[str] = None
+    provider_cost_usd: Optional[float] = None
+    estimated_cost_usd: Optional[float] = None
     
     class Config:
         from_attributes = True

@@ -44,13 +44,20 @@ def _parse_owned_media_ref(value: str) -> Optional[Tuple[str, int, Optional[int]
     return None
 
 
-def _copy_owned_object(minio: MinioService, user_id: int, kind: str, generation_id: int, index: Optional[int]) -> str:
+def _copy_owned_object(
+    minio: MinioService,
+    user_id: int,
+    kind: str,
+    generation_id: int,
+    index: Optional[int],
+    *,
+    allow_any_owner: bool = False,
+) -> str:
     with db_service.get_session() as session:
-        gen = (
-            session.query(Generation)
-            .filter(Generation.id == generation_id, Generation.user_id == user_id)
-            .first()
-        )
+        query = session.query(Generation).filter(Generation.id == generation_id)
+        if not allow_any_owner:
+            query = query.filter(Generation.user_id == user_id)
+        gen = query.first()
         if not gen:
             raise ValueError("Референс недоступен")
         if kind == "ref":
@@ -73,7 +80,13 @@ def _copy_owned_object(minio: MinioService, user_id: int, kind: str, generation_
     return upload["path"]
 
 
-def store_reference_images(minio: MinioService, reference_images: List[str], user_id: int) -> List[str]:
+def store_reference_images(
+    minio: MinioService,
+    reference_images: List[str],
+    user_id: int,
+    *,
+    allow_any_owner: bool = False,
+) -> List[str]:
     urls: List[str] = []
     refs = [item for item in (reference_images or []) if item]
     if len(refs) > MAX_REFERENCE_IMAGES:
@@ -84,7 +97,16 @@ def store_reference_images(minio: MinioService, reference_images: List[str], use
         owned = _parse_owned_media_ref(ref_img_data)
         if owned:
             kind, generation_id, index = owned
-            urls.append(_copy_owned_object(minio, user_id, kind, generation_id, index))
+            urls.append(
+                _copy_owned_object(
+                    minio,
+                    user_id,
+                    kind,
+                    generation_id,
+                    index,
+                    allow_any_owner=allow_any_owner,
+                )
+            )
             continue
         if ref_img_data.startswith("data:image"):
             if len(ref_img_data) > MAX_REF_DATA_URL_CHARS:

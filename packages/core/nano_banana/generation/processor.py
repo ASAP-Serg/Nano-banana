@@ -69,7 +69,28 @@ def rewrite_metadata_fields(metadata: Optional[dict]) -> dict:
         "rewrite_error": meta.get("rewrite_error"),
         "policy_gpt_attempts": meta.get("policy_gpt_attempts"),
         "rewrite_requested": meta.get("rewrite_requested"),
+        "provider_job_id": meta.get("provider_job_id"),
+        "provider_model": meta.get("provider_model"),
+        "provider_cost_usd": meta.get("provider_cost_usd"),
     }
+
+
+def _store_provider_trace(generation, result: Optional[dict]) -> None:
+    if not result:
+        return
+    if not generation.generation_metadata:
+        generation.generation_metadata = {}
+    job_id = result.get("provider_job_id") or result.get("job_id")
+    if job_id:
+        generation.generation_metadata["provider_job_id"] = str(job_id)[:128]
+    if result.get("provider_cost_usd") is not None:
+        try:
+            generation.generation_metadata["provider_cost_usd"] = float(result["provider_cost_usd"])
+        except (TypeError, ValueError):
+            pass
+    if result.get("provider_model"):
+        generation.generation_metadata["provider_model"] = str(result["provider_model"])[:120]
+    flag_modified(generation, "generation_metadata")
 
 
 def _build_resume_payload(generation: Generation, request_data: dict) -> Dict[str, Any]:
@@ -250,6 +271,8 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                         full_error_msg = f"Ошибка генерации ({provider_label_text}): {full_error_msg}"
                     _fail(generation, session, full_error_msg)
                     return
+
+                _store_provider_trace(generation, result)
 
                 if result.get("success"):
                     break

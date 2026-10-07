@@ -16,6 +16,7 @@ from nano_banana.providers.errors import (
     BANANALAB_PROVIDER_UNAVAILABLE_MESSAGE,
     absolute_job_status_url,
     detail_from_response_body,
+    extract_provider_trace,
     find_image_in_json,
     humanize_api_error,
     is_bananalab_paused_message,
@@ -28,6 +29,36 @@ _GATEWAY_RETRY_STATUS = frozenset((502, 503, 521, 522, 523, 524))
 logger = logging.getLogger(__name__)
 
 _MAX_ERROR_BODY_LOG = 8000
+
+
+def _attach_provider_trace(result: Dict[str, Any], *blobs: Any) -> Dict[str, Any]:
+    result.update(extract_provider_trace(result, *blobs))
+    return result
+
+
+def _job_fail(
+    error: str,
+    *,
+    job_id: Any = None,
+    raw: Any = None,
+    retryable: Optional[bool] = None,
+    raw_error: Any = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "__bananalab_job_failed__": True,
+        "error": error,
+        "_raw": raw,
+    }
+    jid = job_id
+    if not jid and isinstance(raw, dict):
+        jid = raw.get("job_id")
+    if jid:
+        payload["job_id"] = jid
+    if retryable is not None:
+        payload["retryable"] = retryable
+    if raw_error is not None:
+        payload["raw_error"] = raw_error
+    return payload
 
 
 def _safe_response_body_for_log(body: Any) -> str:
@@ -123,18 +154,20 @@ class BananalabService:
                 f"{current.get('message') or ''} "
                 f"{current.get('detail') or ''}"
             ).lower()
+            if isinstance(current.get("job_id"), str) and current.get("job_id").strip():
+                job_id = current.get("job_id")
             if "paused" in diag:
-                return {
-                    "__bananalab_job_failed__": True,
-                    "error": str(
+                return _job_fail(
+                    str(
                         current.get("error")
                         or current.get("message")
                         or current.get("detail")
                         or "Модель Banana Lab временно на паузе"
                     ),
-                    "retryable": False,
-                    "_raw": current,
-                }
+                    job_id=job_id,
+                    raw=current,
+                    retryable=False,
+                )
             if st != last_logged:
                 elapsed = time.time() - poll_started_at
                 logger.info(
@@ -153,12 +186,12 @@ class BananalabService:
                     or current.get("message")
                     or detail_from_response_body(current)
                 )
-                return {
-                    "__bananalab_job_failed__": True,
-                    "error": humanize_api_error(err),
-                    "raw_error": err,
-                    "_raw": current,
-                }
+                return _job_fail(
+                    humanize_api_error(err),
+                    job_id=job_id,
+                    raw=current,
+                    raw_error=err,
+                )
 
             img_b, img_u = find_image_in_json(current)
             if img_b or img_u:
@@ -197,31 +230,30 @@ class BananalabService:
                     pr.status_code,
                     _safe_response_body_for_log(body),
                 )
-                return {
-                    "__bananalab_job_failed__": True,
-                    "error": humanize_api_error(detail_from_response_body(body), pr.status_code),
-                    "retryable": pr.status_code in _GATEWAY_RETRY_STATUS or pr.status_code == 429,
-                    "_raw": body,
-                }
+                return _job_fail(
+                    humanize_api_error(detail_from_response_body(body), pr.status_code),
+                    job_id=job_id,
+                    raw=body,
+                    retryable=pr.status_code in _GATEWAY_RETRY_STATUS or pr.status_code == 429,
+                )
 
             try:
                 current = pr.json()
             except Exception as e:
-                return {
-                    "__bananalab_job_failed__": True,
-                    "error": humanize_api_error(pr.text, pr.status_code)
+                return _job_fail(
+                    humanize_api_error(pr.text, pr.status_code)
                     or f"Ответ job не JSON: {e}",
-                    "retryable": pr.status_code in _GATEWAY_RETRY_STATUS,
-                    "_raw": None,
-                }
+                    job_id=job_id,
+                    retryable=pr.status_code in _GATEWAY_RETRY_STATUS,
+                )
 
         elapsed = time.time() - poll_started_at
-        return {
-            "__bananalab_job_failed__": True,
-            "error": f"Таймаут ожидания готовности изображения Banana Lab ({elapsed:.1f}s)",
-            "retryable": True,
-            "_raw": current,
-        }
+        return _job_fail(
+            f"Таймаут ожидания готовности изображения Banana Lab ({elapsed:.1f}s)",
+            job_id=job_id,
+            raw=current,
+            retryable=True,
+        )
 
     def generate_image(
         self,
@@ -454,6 +486,7 @@ class BananalabService:
                     }
 
                 if isinstance(data, dict) and (data.get("job_id") or data.get("status_url")):
+                    posted = data
                     data = self._poll_job_until_done(data)
                     if isinstance(data, dict) and data.get("__bananalab_job_failed__"):
                         raw_err = data.get("raw_error") or data.get("error")
@@ -461,33 +494,44 @@ class BananalabService:
                         low = str(raw_err or err_msg).lower()
                         explicit_retryable = bool(data.get("retryable"))
                         upstream_empty = is_bananalab_upstream_no_image_message(raw_err or err_msg)
-                        return {
-                            "success": False,
-                            "image_url": None,
-                            "image_data": None,
-                            "error": err_msg,
-                            "retryable": explicit_retryable or upstream_empty or any(
-                                x in low for x in ("timeout", "таймаут", "429", "503", "unavailable")
-                            ),
-                        }
+                        return _attach_provider_trace(
+                            {
+                                "success": False,
+                                "image_url": None,
+                                "image_data": None,
+                                "error": err_msg,
+                                "retryable": explicit_retryable or upstream_empty or any(
+                                    x in low for x in ("timeout", "таймаут", "429", "503", "unavailable")
+                                ),
+                            },
+                            posted,
+                            data,
+                            data.get("_raw"),
+                        )
 
                 raw_bytes, image_url = find_image_in_json(data)
                 if raw_bytes:
                     logger.info("[BANANALAB] Получены бинарные данные изображения, %s байт", len(raw_bytes))
-                    return {
-                        "success": True,
-                        "image_url": image_url,
-                        "image_data": raw_bytes,
-                        "error": None,
-                    }
+                    return _attach_provider_trace(
+                        {
+                            "success": True,
+                            "image_url": image_url,
+                            "image_data": raw_bytes,
+                            "error": None,
+                        },
+                        data,
+                    )
                 if image_url:
                     # Скачивание и сохранение в MinIO — в persist_generation_result (один раз, с ретраями).
-                    return {
-                        "success": True,
-                        "image_url": image_url,
-                        "image_data": None,
-                        "error": None,
-                    }
+                    return _attach_provider_trace(
+                        {
+                            "success": True,
+                            "image_url": image_url,
+                            "image_data": None,
+                            "error": None,
+                        },
+                        data,
+                    )
 
                 logger.error(
                     "[BANANALAB] Не удалось извлечь изображение из ответа. "
@@ -496,15 +540,18 @@ class BananalabService:
                     (data.get("result") if isinstance(data, dict) else None),
                     (data.get("error") if isinstance(data, dict) else None),
                 )
-                return {
-                    "success": False,
-                    "image_url": None,
-                    "image_data": None,
-                    "error": "Неожиданный формат ответа Moonez: нет URL и base64 изображения "
-                    "(пустой done). Обычно помогает повтор.",
-                    "retryable": True,
-                    "empty_done": True,
-                }
+                return _attach_provider_trace(
+                    {
+                        "success": False,
+                        "image_url": None,
+                        "image_data": None,
+                        "error": "Неожиданный формат ответа Moonez: нет URL и base64 изображения "
+                        "(пустой done). Обычно помогает повтор.",
+                        "retryable": True,
+                        "empty_done": True,
+                    },
+                    data,
+                )
 
             except requests.Timeout as e:
                 last_exc = e

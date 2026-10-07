@@ -58,6 +58,86 @@ def absolute_job_status_url(base_url: str, data: Dict[str, Any]) -> Optional[str
     return None
 
 
+_JOB_ID_IN_URL = re.compile(r"/jobs/([0-9a-fA-F-]{8,128})")
+
+
+def extract_job_id(data: Any) -> Optional[str]:
+    """job_id из тела Moonez / status_url — для сверки с кабинетом."""
+    if not isinstance(data, dict):
+        return None
+    for blob in (data, data.get("_raw") if isinstance(data.get("_raw"), dict) else None):
+        if not isinstance(blob, dict):
+            continue
+        jid = blob.get("job_id") or blob.get("provider_job_id")
+        if isinstance(jid, str) and jid.strip() and jid.strip().lower() not in ("none", "null"):
+            return jid.strip()[:128]
+        for url_key in ("status_url", "url"):
+            url = blob.get(url_key)
+            if isinstance(url, str):
+                match = _JOB_ID_IN_URL.search(url)
+                if match:
+                    return match.group(1)[:128]
+    return None
+
+
+def extract_provider_cost_usd(data: Any) -> Optional[float]:
+    if not isinstance(data, dict):
+        return None
+    nested = [data]
+    for key in ("_raw", "result", "usage", "meta", "billing"):
+        blob = data.get(key)
+        if isinstance(blob, dict):
+            nested.append(blob)
+    for blob in nested:
+        for key in ("cost_usd", "cost", "price_usd", "price"):
+            val = blob.get(key)
+            if val is None:
+                continue
+            try:
+                amount = float(val)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= amount < 1000:
+                return round(amount, 6)
+    return None
+
+
+def extract_provider_model(data: Any) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+    nested = [data]
+    for key in ("_raw", "result"):
+        blob = data.get(key)
+        if isinstance(blob, dict):
+            nested.append(blob)
+    for blob in nested:
+        for key in ("model", "model_id", "upstream_model", "google_model"):
+            val = blob.get(key)
+            if isinstance(val, str) and val.strip() and len(val.strip()) < 200:
+                return val.strip()[:120]
+    return None
+
+
+def extract_provider_trace(*blobs: Any) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for blob in blobs:
+        if "provider_job_id" not in out:
+            job_id = extract_job_id(blob)
+            if job_id:
+                out["provider_job_id"] = job_id
+        if "provider_cost_usd" not in out:
+            cost = extract_provider_cost_usd(blob)
+            if cost is not None:
+                out["provider_cost_usd"] = cost
+        if "provider_model" not in out:
+            model = extract_provider_model(blob)
+            if model:
+                out["provider_model"] = model
+        if len(out) == 3:
+            break
+    return out
+
+
 def _normalize_bananalab_job_url(url: str, base_url: str) -> str:
     """Job URL иногда приходит без префикса /api (legacy hosts + Moonez)."""
     if "/api/api/" in url:
@@ -114,6 +194,21 @@ BANANALAB_UPSTREAM_NO_IMAGE_EXHAUSTED_MESSAGE = (
     "Это ограничение модели (иногда срабатывает на фото знаменитостей или нестабильный upstream), "
     "а не ошибка вашего сайта. Попробуйте запустить генерацию ещё раз позже или измените формулировку вручную."
 )
+
+BANANALAB_UPSTREAM_RATE_LIMIT_MESSAGE = (
+    "Google через Moonez временно ограничил частоту запросов. "
+    "Это квота ключа в кабинете Moonez (общая на проект, не обязательно из-за частоты на этом сайте). "
+    "Подождите несколько минут и повторите."
+)
+
+
+def is_bananalab_upstream_rate_limit_message(text: Any) -> bool:
+    lower = str(text or "").lower()
+    return (
+        "upstream is rate-limited" in lower
+        or ("upstream" in lower and "rate-limited" in lower)
+        or ("upstream" in lower and "rate limit" in lower)
+    )
 
 
 def upstream_no_image_retry_delay_seconds(retry_count: int, base_delay: float = 3.0) -> float:
@@ -359,6 +454,9 @@ def humanize_api_error(
 
     if is_bananalab_unavailable_message(text):
         return BANANALAB_PROVIDER_UNAVAILABLE_MESSAGE
+
+    if is_bananalab_upstream_rate_limit_message(text):
+        return BANANALAB_UPSTREAM_RATE_LIMIT_MESSAGE
 
     if is_bananalab_upstream_no_image_message(text):
         return BANANALAB_UPSTREAM_NO_IMAGE_RETRY_MESSAGE

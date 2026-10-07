@@ -15,6 +15,7 @@ from nano_banana.db.session import db_service
 from nano_banana.config import settings
 from nano_banana.rate_limit import check_rate_limit
 from nano_banana.schemas import AdminPasswordRequest
+from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.idle import IDLE_GENERATION_DAYS, is_generation_idle
 from nano_banana.storage.media import client_reference_urls, client_result_url
 from nano_banana.storage.s3 import MinioService
@@ -122,34 +123,20 @@ def _generation_full_payload(gen: Generation, username: Optional[str] = None) ->
         "error_message": metadata.get("error"),
         "provider": _infer_provider(gen),
         "created_at": gen.created_at.isoformat() if gen.created_at else None,
+        "provider_job_id": metadata.get("provider_job_id"),
+        "provider_model": metadata.get("provider_model"),
+        "provider_cost_usd": metadata.get("provider_cost_usd"),
+        "estimated_cost_usd": _estimate_cost_usd(gen),
     }
 
 
 def _estimate_cost_usd(gen: Generation) -> float:
-    model = (gen.model_name or "nano-banana-pro").lower()
-    resolution = (gen.resolution or "1K").upper()
     metadata = gen.generation_metadata or {}
-
-    model_price = {
-        "nano-banana": 0.015,
-        "nano-banana-2": 0.02,
-        "nano-banana-pro": 0.03,
-        "nano-banana-2-r8": 0.02,
-        "nano-banana-r8": 0.015,
-        "nano-banana-pro-r8": 0.03,
-        "gemini-2.5-flash-image": 0.02,
-        "imagen-4": 0.04,
-        "imagen-4-fast": 0.02,
-        "imagen-4-ultra": 0.06,
-        "gpt-image-2": 0.08,
-        "gpt-image-1-mini": 0.015,
-        "gpt-5-image": 0.05,
-        "gpt-5-image-mini": 0.02,
-    }.get(model, 0.02)
-    resolution_multiplier = {"1K": 1.0, "2K": 1.6, "4K": 2.5}.get(resolution, 1.0)
-    refs_count = int(metadata.get("reference_images_count") or 0)
-    refs_fee = min(refs_count, 14) * 0.002
-    return round(model_price * resolution_multiplier + refs_fee, 6)
+    return estimate_cost_usd(
+        model_name=gen.model_name,
+        resolution=gen.resolution,
+        reference_count=int(metadata.get("reference_images_count") or 0),
+    )
 
 
 @router.get("/users")

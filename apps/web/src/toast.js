@@ -1,3 +1,25 @@
+export async function copyText(text, label = "ID") {
+  try {
+    await navigator.clipboard.writeText(String(text));
+    toast(`${label} скопирован`);
+  } catch {
+    toast("Не удалось скопировать", "error");
+  }
+}
+
+export function formatUsd(n) {
+  const value = Number(n);
+  if (!Number.isFinite(value)) return null;
+  const formatted = value.toFixed(4).replace(/\.?0+$/, "");
+  return `$${formatted || "0"}`;
+}
+
+export function shortJobId(id) {
+  const value = String(id || "");
+  if (value.length <= 20) return value;
+  return `${value.slice(0, 8)}…${value.slice(-4)}`;
+}
+
 export function toast(message, type = "success") {
   const el = document.getElementById("nb-toast");
   if (!el) return;

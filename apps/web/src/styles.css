@@ -1181,6 +1181,25 @@ button.info-btn:hover,
     overflow: hidden;
 }
 
+.admin-gen-card .admin-gen-meta {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
+}
+
+.copy-id {
+    font-size: 0.72rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    word-break: break-all;
+    color: var(--muted-foreground, #6c757d);
+    text-decoration: none;
+    vertical-align: baseline;
+}
+
+.copy-id:hover {
+    text-decoration: underline;
+}
+
 .prompt-text {
     scrollbar-width: thin;
     scrollbar-color: rgba(150, 150, 155, 0.45) transparent;

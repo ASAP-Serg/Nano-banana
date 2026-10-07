@@ -1,4 +1,4 @@
-import { PROVIDER_BADGE } from "../toast.js";
+import { copyText, formatUsd, PROVIDER_BADGE } from "../toast.js";
 
 export default function ParamsModal({ item, onClose }) {
   if (!item) return null;
@@ -15,6 +15,40 @@ export default function ParamsModal({ item, onClose }) {
           {item.provider ? (
             <span className="badge bg-secondary ms-2">{PROVIDER_BADGE[item.provider] || item.provider}</span>
           ) : null}
+          {item.provider_model ? (
+            <span className="small text-muted ms-2">upstream: {item.provider_model}</span>
+          ) : null}
+        </p>
+        <p>
+          <strong>ID на сайте:</strong>{" "}
+          <button
+            type="button"
+            className="btn btn-link btn-sm p-0 copy-id"
+            onClick={() => copyText(item.id, "ID генерации")}
+          >
+            #{item.id}
+          </button>
+        </p>
+        {item.provider_job_id ? (
+          <p>
+            <strong>Moonez job id:</strong>{" "}
+            <button
+              type="button"
+              className="btn btn-link btn-sm p-0 copy-id"
+              title="Сверить в кабинете Moonez"
+              onClick={() => copyText(item.provider_job_id, "Moonez job id")}
+            >
+              {item.provider_job_id}
+            </button>
+          </p>
+        ) : null}
+        <p>
+          <strong>Стоимость:</strong>{" "}
+          {item.provider_cost_usd != null
+            ? `${formatUsd(item.provider_cost_usd)} (как вернул Moonez)`
+            : item.estimated_cost_usd != null
+              ? `~${formatUsd(item.estimated_cost_usd)} оценка (Pro 1K ≈ $0.03; сверка в кабинете Moonez по job id)`
+              : "—"}
         </p>
         <p>
           <strong>Разрешение / кадр:</strong> {item.resolution || "—"} · {item.aspect_ratio || "—"}

@@ -229,6 +229,7 @@ class TestQueuePayloadNoSecrets(unittest.TestCase):
         self.assertNotIn("request.api_key", text)
         self.assertIn("check_rate_limit", text)
         self.assertIn("generate-user", text)
+        self.assertIn("allow_any_owner", text)
 
 
 class TestPublicValidationErrors(unittest.TestCase):

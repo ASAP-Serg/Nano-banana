@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
-import { isSafeMediaUrl, toast } from "../toast.js";
+import { copyText, formatUsd, isSafeMediaUrl, shortJobId, toast } from "../toast.js";
 import { IconToForm } from "../icons.jsx";
 import Lightbox from "./Lightbox.jsx";
 import Modal from "./Modal.jsx";
@@ -349,7 +349,27 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                     </div>
                     <div className="card-body small">
                       <div>
-                        {g.username} · {g.status} · {g.model_name}
+                        #{g.id} · {g.username} · {g.status} · {g.model_name}
+                      </div>
+                      <div className="admin-gen-meta text-muted">
+                        {g.provider_cost_usd != null
+                          ? `${formatUsd(g.provider_cost_usd)} Moonez`
+                          : g.estimated_cost_usd != null
+                            ? `~${formatUsd(g.estimated_cost_usd)} оценка`
+                            : ""}
+                        {g.provider_job_id ? (
+                          <>
+                            {" · "}
+                            <button
+                              type="button"
+                              className="btn btn-link btn-sm p-0 copy-id"
+                              title="Скопировать id задачи Moonez"
+                              onClick={() => copyText(g.provider_job_id, "Moonez job id")}
+                            >
+                              {shortJobId(g.provider_job_id)}
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                       <div className="text-muted">{g.prompt}</div>
                       <button

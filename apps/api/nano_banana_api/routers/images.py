@@ -14,6 +14,7 @@ from nano_banana.db.models import Generation, User
 from nano_banana.db.session import db_service
 from nano_banana.generation.cleanup import cleanup_old_generations
 from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
+from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.generation.processor import MAX_GENERATION_RETRIES, get_fallback_model, rewrite_metadata_fields
 from nano_banana.generation.references import store_reference_images
 from nano_banana.providers.models import DEFAULT_MODEL_ID, MODEL_REGISTRY, get_model_entry, get_provider_for_model, models_available_with_keys
@@ -135,7 +136,10 @@ async def generate_image(
             if body.reference_images:
                 try:
                     reference_image_urls = store_reference_images(
-                        _storage(), body.reference_images, user.user_id
+                        _storage(),
+                        body.reference_images,
+                        user.user_id,
+                        allow_any_owner=bool(user.is_admin and user.totp_enabled),
                     )
                 except Exception:
                     session.delete(generation)
@@ -213,6 +217,11 @@ async def list_generations(
                 retry_count=int(meta.get("retry_count", 0) or 0),
                 max_retries=int(meta.get("max_retries", MAX_GENERATION_RETRIES) or MAX_GENERATION_RETRIES),
                 fallback_model=get_fallback_model(model_name),
+                estimated_cost_usd=estimate_cost_usd(
+                    model_name=model_name,
+                    resolution=gen.resolution,
+                    reference_count=int(meta.get("reference_images_count") or 0),
+                ),
                 **rewrite_metadata_fields(meta),
             )
             data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
@@ -390,6 +399,11 @@ async def get_generation_full(
             "result_url": client_result_url(generation),
             "status": generation.status,
             "error_message": metadata.get("error"),
+            "estimated_cost_usd": estimate_cost_usd(
+                model_name=model_name,
+                resolution=generation.resolution,
+                reference_count=int(metadata.get("reference_images_count") or 0),
+            ),
             **rewrite_metadata_fields(metadata),
         }
 

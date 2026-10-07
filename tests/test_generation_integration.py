@@ -369,6 +369,23 @@ class TestHumanizeApiError(unittest.TestCase):
         msg = humanize_api_error("Upstream returned no image")
         self.assertIn("повторяем автоматически", msg.lower())
 
+    def test_upstream_rate_limit_is_humanized(self):
+        from nano_banana.providers.errors import (
+            BANANALAB_UPSTREAM_RATE_LIMIT_MESSAGE,
+            humanize_api_error,
+            is_bananalab_upstream_rate_limit_message,
+        )
+
+        self.assertTrue(
+            is_bananalab_upstream_rate_limit_message(
+                "Upstream is rate-limited; please retry later"
+            )
+        )
+        self.assertEqual(
+            humanize_api_error("Upstream is rate-limited; please retry later"),
+            BANANALAB_UPSTREAM_RATE_LIMIT_MESSAGE,
+        )
+
     def test_is_bananalab_empty_done_message(self):
         from nano_banana.providers.errors import is_bananalab_empty_done_message
 
@@ -485,6 +502,34 @@ class TestPublicServiceStatus(unittest.TestCase):
         ids = [svc["id"] for svc in payload["services"]]
         self.assertEqual(ids, ["moonez", "google_gemini"])
 
+
+class TestProviderTraceAndCost(unittest.TestCase):
+    def test_extract_job_id_from_body_and_status_url(self):
+        from nano_banana.providers.errors import extract_job_id, extract_provider_trace
+
+        jid = "923f3213-cda5-4e13-8e47-2ea73383aefb"
+        self.assertEqual(extract_job_id({"job_id": jid, "status": "done"}), jid)
+        self.assertEqual(
+            extract_job_id({"status_url": f"https://api.moonez.ai/api/v1/jobs/{jid}"}),
+            jid,
+        )
+        trace = extract_provider_trace(
+            {"__bananalab_job_failed__": True, "_raw": {"job_id": jid, "cost_usd": 0.0335}},
+        )
+        self.assertEqual(trace["provider_job_id"], jid)
+        self.assertEqual(trace["provider_cost_usd"], 0.0335)
+
+    def test_pro_cost_estimate(self):
+        from nano_banana.generation.cost import estimate_cost_usd
+
+        self.assertEqual(
+            estimate_cost_usd(model_name="nano-banana-pro", resolution="1K"),
+            0.03,
+        )
+        self.assertEqual(
+            estimate_cost_usd(model_name="nano-banana-pro", resolution="2K", reference_count=2),
+            round(0.03 * 1.6 + 0.004, 6),
+        )
 
 if __name__ == "__main__":
     unittest.main()

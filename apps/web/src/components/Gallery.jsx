@@ -1,4 +1,4 @@
-import { downloadImage, isSafeMediaUrl, PROVIDER_BADGE, toast } from "../toast.js";
+import { copyText, downloadImage, formatUsd, isSafeMediaUrl, PROVIDER_BADGE, shortJobId, toast } from "../toast.js";
 import { IconButton, IconDownload, IconInfo, IconRefresh, IconToForm, IconTrash } from "../icons.jsx";
 
 function statusLabel(item) {
@@ -58,9 +58,26 @@ export default function Gallery({
                 <div className="card-body">
                   <p className="small mb-1 prompt-text">{item.prompt}</p>
                   <div className="small text-muted">
-                    {item.model_name} · {statusLabel(item)}
+                    #{item.id} · {item.model_name} · {statusLabel(item)}
                     {item.provider ? ` · ${PROVIDER_BADGE[item.provider] || item.provider}` : ""}
                   </div>
+                  {(item.provider_cost_usd != null || item.estimated_cost_usd != null) && (
+                    <div className="small text-muted">
+                      {item.provider_cost_usd != null
+                        ? `${formatUsd(item.provider_cost_usd)} Moonez`
+                        : `~${formatUsd(item.estimated_cost_usd)} оценка`}
+                    </div>
+                  )}
+                  {item.provider_job_id ? (
+                    <button
+                      type="button"
+                      className="btn btn-link btn-sm p-0 copy-id"
+                      title="Скопировать id задачи Moonez"
+                      onClick={() => copyText(item.provider_job_id, "Moonez job id")}
+                    >
+                      Moonez: {shortJobId(item.provider_job_id)}
+                    </button>
+                  ) : null}
                   {item.rewritten_prompt && <div className="small text-success mt-1">Промпт переписан GPT</div>}
                   {item.error_message && <div className="small text-danger mt-1">{item.error_message}</div>}
                   <div className="d-flex flex-wrap gap-1 mt-2">
