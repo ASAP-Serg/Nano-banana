@@ -45,10 +45,12 @@ export default function ParamsModal({ item, onClose }) {
         <p>
           <strong>Стоимость:</strong>{" "}
           {item.provider_cost_usd != null
-            ? `${formatUsd(item.provider_cost_usd)} (как вернул Moonez)`
-            : item.estimated_cost_usd != null
-              ? `~${formatUsd(item.estimated_cost_usd)} оценка (Banana 2 1K ≈ $0.0335; точная цена в кабинете Moonez)`
-              : "—"}
+            ? `${formatUsd(item.provider_cost_usd)} списал Moonez`
+            : item.status === "failed"
+              ? "нет (генка не прошла)"
+              : item.estimated_cost_usd != null
+                ? `~${formatUsd(item.estimated_cost_usd)} оценка, пока Moonez не отдал price`
+                : "—"}
         </p>
         <p>
           <strong>Разрешение / кадр:</strong> {item.resolution || "—"} · {item.aspect_ratio || "—"}

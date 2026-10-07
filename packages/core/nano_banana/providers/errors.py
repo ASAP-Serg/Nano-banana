@@ -80,25 +80,56 @@ def extract_job_id(data: Any) -> Optional[str]:
     return None
 
 
+_COST_KEYS = (
+    "price",
+    "price_usd",
+    "cost_usd",
+    "cost",
+    "reserved",
+    "reserved_usd",
+    "reserved_price",
+    "billed",
+    "billed_usd",
+    "amount_usd",
+    "charge_usd",
+)
+
+
+def _as_money_usd(val: Any) -> Optional[float]:
+    if val is None or isinstance(val, bool):
+        return None
+    if isinstance(val, str):
+        text = val.strip().replace(",", ".").replace("$", "")
+        val = text
+    try:
+        amount = float(val)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= amount < 1000:
+        return round(amount, 6)
+    return None
+
+
 def extract_provider_cost_usd(data: Any) -> Optional[float]:
+    """Цена job из тела Moonez (колонка «Цена» в кабинете), не картинка в result."""
     if not isinstance(data, dict):
         return None
-    nested = [data]
-    for key in ("_raw", "result", "usage", "meta", "billing"):
-        blob = data.get(key)
-        if isinstance(blob, dict):
-            nested.append(blob)
-    for blob in nested:
-        for key in ("cost_usd", "cost", "price_usd", "price"):
-            val = blob.get(key)
-            if val is None:
+    bags = [data]
+    raw = data.get("_raw")
+    if isinstance(raw, dict):
+        bags.append(raw)
+    for nest in ("usage", "meta", "billing", "pricing"):
+        for bag in (data, raw if isinstance(raw, dict) else None):
+            if not isinstance(bag, dict):
                 continue
-            try:
-                amount = float(val)
-            except (TypeError, ValueError):
-                continue
-            if 0 <= amount < 1000:
-                return round(amount, 6)
+            blob = bag.get(nest)
+            if isinstance(blob, dict):
+                bags.append(blob)
+    for blob in bags:
+        for key in _COST_KEYS:
+            amount = _as_money_usd(blob.get(key))
+            if amount is not None:
+                return amount
     return None
 
 

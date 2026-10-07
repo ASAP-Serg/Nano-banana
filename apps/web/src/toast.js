@@ -10,8 +10,7 @@ export async function copyText(text, label = "ID") {
 export function formatUsd(n) {
   const value = Number(n);
   if (!Number.isFinite(value)) return null;
-  const formatted = value.toFixed(4).replace(/\.?0+$/, "");
-  return `$${formatted || "0"}`;
+  return `$${value.toFixed(5)}`;
 }
 
 export function shortJobId(id) {

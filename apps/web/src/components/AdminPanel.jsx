@@ -354,7 +354,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                       <div className="admin-gen-meta text-muted">
                         {g.provider_cost_usd != null
                           ? `${formatUsd(g.provider_cost_usd)} Moonez`
-                          : g.estimated_cost_usd != null
+                          : g.status !== "failed" && g.estimated_cost_usd != null
                             ? `~${formatUsd(g.estimated_cost_usd)} оценка`
                             : ""}
                         {g.provider_job_id ? (

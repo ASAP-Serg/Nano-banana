@@ -508,7 +508,7 @@ class TestPublicServiceStatus(unittest.TestCase):
 
 class TestProviderTraceAndCost(unittest.TestCase):
     def test_extract_job_id_from_body_and_status_url(self):
-        from nano_banana.providers.errors import extract_job_id, extract_provider_trace
+        from nano_banana.providers.errors import extract_job_id, extract_provider_cost_usd, extract_provider_trace
 
         jid = "923f3213-cda5-4e13-8e47-2ea73383aefb"
         self.assertEqual(extract_job_id({"job_id": jid, "status": "done"}), jid)
@@ -521,6 +521,8 @@ class TestProviderTraceAndCost(unittest.TestCase):
         )
         self.assertEqual(trace["provider_job_id"], jid)
         self.assertEqual(trace["provider_cost_usd"], 0.0335)
+        self.assertEqual(extract_provider_cost_usd({"job_id": jid, "price": "0.06780"}), 0.0678)
+        self.assertEqual(extract_provider_cost_usd({"reserved": "0,03350"}), 0.0335)
 
     def test_pro_cost_estimate(self):
         from nano_banana.generation.cost import estimate_cost_usd
@@ -534,8 +536,12 @@ class TestProviderTraceAndCost(unittest.TestCase):
             0.0084,
         )
         self.assertEqual(
-            estimate_cost_usd(model_name="nano-banana-pro", resolution="2K", reference_count=2),
-            round(0.08 * 1.6 + 0.004, 6),
+            estimate_cost_usd(model_name="nano-banana-pro", resolution="1K", reference_count=2),
+            0.0678,
+        )
+        self.assertEqual(
+            estimate_cost_usd(model_name="nano-banana", resolution="1K", reference_count=2),
+            0.10,
         )
 
     def test_moonez_unified_payload_maps_frontend_models(self):

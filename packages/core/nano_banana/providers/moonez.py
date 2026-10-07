@@ -17,6 +17,7 @@ from nano_banana.providers.errors import (
     BANANALAB_PROVIDER_UNAVAILABLE_MESSAGE,
     absolute_job_status_url,
     detail_from_response_body,
+    extract_provider_cost_usd,
     extract_provider_trace,
     find_image_in_json,
     humanize_api_error,
@@ -35,6 +36,18 @@ _MAX_ERROR_BODY_LOG = 8000
 def _attach_provider_trace(result: Dict[str, Any], *blobs: Any) -> Dict[str, Any]:
     result.update(extract_provider_trace(result, *blobs))
     return result
+
+
+def _stamp_job_price(job: Dict[str, Any], *sources: Any) -> Dict[str, Any]:
+    if extract_provider_cost_usd(job) is not None:
+        return job
+    for src in sources:
+        amount = extract_provider_cost_usd(src)
+        if amount is not None:
+            stamped = dict(job)
+            stamped["price"] = amount
+            return stamped
+    return job
 
 
 def _job_fail(
@@ -269,15 +282,19 @@ class BananalabService:
             if st != last_logged:
                 elapsed = time.time() - poll_started_at
                 logger.info(
-                    "[BANANALAB] job_id=%s status=%s elapsed=%.1fs",
+                    "[BANANALAB] job_id=%s status=%s elapsed=%.1fs keys=%s price=%s",
                     job_id,
                     current.get("status"),
                     elapsed,
+                    list(current.keys()),
+                    current.get("price")
+                    if current.get("price") is not None
+                    else current.get("reserved") or current.get("cost"),
                 )
                 last_logged = st
 
             if st in ("completed", "succeeded", "success", "done", "finished"):
-                return current
+                return _stamp_job_price(current, initial)
             if st in ("failed", "error", "cancelled", "canceled"):
                 err = (
                     current.get("error")
@@ -293,7 +310,7 @@ class BananalabService:
 
             img_b, img_u = find_image_in_json(current)
             if img_b or img_u:
-                return current
+                return _stamp_job_price(current, initial)
 
             if st not in (
                 "",
