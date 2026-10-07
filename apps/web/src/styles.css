@@ -1470,9 +1470,23 @@ button.info-btn:hover,
     font-size: 0.72rem;
 }
 
-.model-dropdown-item-title {
+.model-dropdown-item-copy {
     flex: 1;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.model-dropdown-item-title {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.model-dropdown-item-sub {
+    font-size: 0.68rem;
+    color: var(--muted-foreground);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

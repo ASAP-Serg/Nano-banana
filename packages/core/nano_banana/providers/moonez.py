@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from nano_banana.config import settings
+from nano_banana.providers.models import MODEL_REGISTRY, get_model_entry, moonez_slug
 from nano_banana.providers.prompt import enhance_prompt_for_image_generation
 from nano_banana.providers.errors import (
     BANANALAB_PROVIDER_UNAVAILABLE_MESSAGE,
@@ -75,8 +76,105 @@ def _safe_response_body_for_log(body: Any) -> str:
         return str(body)[:_MAX_ERROR_BODY_LOG]
 
 
-# По актуальной документации Banana Lab выбор модели не передается в request body.
-SUPPORTED_BANANALAB_FRONTEND_MODELS = frozenset(("nano-banana-pro", "nano-banana-2", "nano-banana"))
+# Маркетинговые имена на сайте → id в кабинете Moonez / Google.
+# Banana = gemini-2.5-flash-image, Banana 2 = gemini-3.1-flash-image,
+# Banana 2.1 = gemini-nano-banana-2.1, Pro = gemini-3-pro-image.
+# Старые /v1/nb2/* всегда били в 3.1-flash-image; теперь POST /v1/generations + поле model.
+SUPPORTED_BANANALAB_FRONTEND_MODELS = frozenset(
+    model_id for model_id, entry in MODEL_REGISTRY.items() if entry.get("moonez_model")
+)
+
+
+def _all_moonez_upstream_ids() -> frozenset:
+    ids = set()
+    for entry in MODEL_REGISTRY.values():
+        if entry.get("moonez_model"):
+            ids.add(str(entry["moonez_model"]))
+        for alias in entry.get("moonez_model_aliases") or ():
+            ids.add(str(alias))
+    return frozenset(ids)
+
+
+MOONEZ_UPSTREAM_IDS = _all_moonez_upstream_ids()
+_FLASH_25 = "gemini-2.5-flash-image"
+
+
+def moonez_upstream_model(model_name: Optional[str]) -> str:
+    key = (model_name or "").strip().lower()
+    slug = moonez_slug(key)
+    if slug:
+        return slug
+    if key in MOONEZ_UPSTREAM_IDS:
+        return key
+    return "gemini-3-pro-image"
+
+
+def moonez_model_candidates(model_name: Optional[str]) -> List[str]:
+    """Основной id + алиасы: когда Moonez включит 2.1, сработает preview/3.6-flash-image без релиза."""
+    key = (model_name or "").strip().lower()
+    out: List[str] = []
+    primary = moonez_upstream_model(key)
+    if primary:
+        out.append(primary)
+    entry = get_model_entry(key)
+    if entry:
+        for alias in entry.get("moonez_model_aliases") or ():
+            alias_id = str(alias).strip()
+            if alias_id and alias_id not in out:
+                out.append(alias_id)
+    return out
+
+
+def is_unknown_moonez_model_error(message: Any, http_status: Optional[int] = None) -> bool:
+    if http_status not in (400, 404, 422):
+        return False
+    lower = str(message or "").lower()
+    return any(
+        marker in lower
+        for marker in (
+            "unknown model",
+            "invalid model",
+            "model not found",
+            "unsupported model",
+            "not a valid model",
+            "model is not supported",
+            "does not exist",
+        )
+    )
+
+
+def _resolution_for_upstream(upstream: str, resolution: str) -> str:
+    if upstream == _FLASH_25:
+        return "1K"
+    value = (resolution or "1K").upper()
+    return value if value in ("1K", "2K", "4K") else "1K"
+
+
+def build_generation_request(
+    base_url: str,
+    *,
+    model_name: Optional[str],
+    prompt: str,
+    aspect_ratio: str,
+    resolution: str,
+    input_images_base64: Optional[List[str]] = None,
+    input_images_urls: Optional[List[str]] = None,
+    upstream: Optional[str] = None,
+) -> tuple[str, Dict[str, Any]]:
+    """Единый POST /v1/generations: модель выбирается полем `model`, не префиксом URL."""
+    chosen = (upstream or moonez_upstream_model(model_name) or "").strip()
+    payload: Dict[str, Any] = {
+        "model": chosen,
+        "prompt": prompt,
+        "aspect_ratio": aspect_ratio or "1:1",
+        "resolution": _resolution_for_upstream(chosen, resolution),
+    }
+    if input_images_base64:
+        payload["input_images_base64"] = list(input_images_base64)
+    elif input_images_urls:
+        payload["input_images_urls"] = list(input_images_urls)
+    url = f"{(base_url or '').rstrip('/')}/v1/generations"
+    return url, payload
 
 
 def _optimize_image_for_api(image_data: bytes, ref_index: int) -> bytes:
@@ -275,7 +373,11 @@ class BananalabService:
             )
 
         if model_name and model_name not in SUPPORTED_BANANALAB_FRONTEND_MODELS:
-            logger.warning("[BANANALAB] Модель %s не поддерживается клиентом, игнорируем", model_name)
+            logger.warning(
+                "[BANANALAB] Модель %s не из Moonez image-набора, шлём %s",
+                model_name,
+                moonez_upstream_model(model_name),
+            )
         input_b64_list: List[str] = []
         input_url_list: List[str] = []
         reference_images = reference_images or []
@@ -310,66 +412,49 @@ class BananalabService:
 
         has_b64_refs = len(input_b64_list) > 0
         has_url_refs = len(input_url_list) > 0 and not has_b64_refs
+        model_candidates = moonez_model_candidates(model_name)
+        candidate_i = 0
+        using_url_refs = True
 
         def _build_request(use_url_refs: bool) -> tuple[str, Dict[str, Any]]:
-            if has_b64_refs:
-                return (
-                    f"{self.base_url}/v1/nb2/generations",
-                    {
-                        "prompt": final_prompt,
-                        "aspect_ratio": aspect_ratio,
-                        "resolution": resolution,
-                        "input_images_base64": input_b64_list,
-                    },
-                )
-            if use_url_refs and has_url_refs:
-                return (
-                    f"{self.base_url}/v1/nb2/url-generations",
-                    {
-                        "prompt": final_prompt,
-                        "aspect_ratio": aspect_ratio,
-                        "resolution": resolution,
-                        "input_images_urls": input_url_list,
-                    },
-                )
-            if has_url_refs:
-                # URL endpoint может быть выключен на аккаунте; fallback в base64.
-                fallback_b64: List[str] = []
+            b64 = list(input_b64_list) if has_b64_refs else []
+            urls = list(input_url_list) if (use_url_refs and has_url_refs) else []
+            if has_url_refs and not use_url_refs and not b64:
                 for idx, img_url in enumerate(input_url_list, 1):
                     try:
                         from nano_banana.storage.results import download_image_from_url
                         img_bytes = download_image_from_url(img_url, read_timeout=30, retries=2)
                         if img_bytes:
                             img_data = _optimize_image_for_api(img_bytes, idx)
-                            fallback_b64.append(base64.b64encode(img_data).decode("ascii"))
+                            b64.append(base64.b64encode(img_data).decode("ascii"))
                     except Exception as e:
                         logger.warning("[BANANALAB] fallback URL->base64 не удался для ref %s: %s", idx, e)
-                return (
-                    f"{self.base_url}/v1/nb2/generations",
-                    {
-                        "prompt": final_prompt,
-                        "aspect_ratio": aspect_ratio,
-                        "resolution": resolution,
-                        "input_images_base64": fallback_b64,
-                    },
-                )
-            return (
-                f"{self.base_url}/v1/nb2/text-generations",
-                {
-                    "prompt": final_prompt,
-                    "aspect_ratio": aspect_ratio,
-                    "resolution": resolution,
-                },
+            return build_generation_request(
+                self.base_url,
+                model_name=model_name,
+                prompt=final_prompt,
+                aspect_ratio=aspect_ratio,
+                resolution=resolution,
+                input_images_base64=b64 or None,
+                input_images_urls=urls or None,
+                upstream=model_candidates[candidate_i],
             )
 
-        url, payload = _build_request(use_url_refs=True)
+        url, payload = _build_request(use_url_refs=using_url_refs)
         last_exc: Optional[Exception] = None
+
+        def finish(result: Dict[str, Any], *blobs: Any) -> Dict[str, Any]:
+            chosen = payload.get("model") or model_candidates[candidate_i]
+            out = _attach_provider_trace(result, {"model": chosen}, *blobs)
+            out.setdefault("provider_model", chosen)
+            return out
 
         for attempt in range(1, self.MAX_RETRIES + 1):
             try:
                 logger.info(
-                    "[BANANALAB] POST %s (попытка %s/%s), refs(base64)=%s refs(url)=%s",
+                    "[BANANALAB] POST %s model=%s (попытка %s/%s), refs(base64)=%s refs(url)=%s",
                     url,
+                    payload.get("model"),
                     attempt,
                     self.MAX_RETRIES,
                     len(input_b64_list),
@@ -439,16 +524,17 @@ class BananalabService:
                         msg[:500],
                         _safe_response_body_for_log(body),
                     )
-                    # Авто-fallback: если URL endpoint запрещен для аккаунта, пересобираем запрос в base64 endpoint.
+                    # Авто-fallback: если URL-референсы запрещены для аккаунта, пересобираем в base64.
                     if (
-                        url.endswith("/v1/nb2/url-generations")
+                        payload.get("input_images_urls")
                         and resp.status_code == 403
                         and "url" in msg.lower()
                         and "not enabled" in msg.lower()
                     ):
                         logger.warning(
-                            "[BANANALAB] URL endpoint не включен для аккаунта, fallback на /v1/nb2/generations"
+                            "[BANANALAB] URL-референсы не включены для аккаунта, fallback на base64"
                         )
+                        using_url_refs = False
                         url, payload = _build_request(use_url_refs=False)
                         if payload.get("input_images_base64"):
                             continue
@@ -459,6 +545,18 @@ class BananalabService:
                             "error": "URL endpoint Banana Lab недоступен и fallback в base64 не удался.",
                             "retryable": False,
                         }
+                    if is_unknown_moonez_model_error(msg, resp.status_code) and candidate_i + 1 < len(
+                        model_candidates
+                    ):
+                        logger.warning(
+                            "[BANANALAB] model %s не принят (%s), пробуем %s",
+                            payload.get("model"),
+                            resp.status_code,
+                            model_candidates[candidate_i + 1],
+                        )
+                        candidate_i += 1
+                        url, payload = _build_request(use_url_refs=using_url_refs)
+                        continue
                     uf = msg
                     if retryable:
                         uf = (
@@ -494,7 +592,7 @@ class BananalabService:
                         low = str(raw_err or err_msg).lower()
                         explicit_retryable = bool(data.get("retryable"))
                         upstream_empty = is_bananalab_upstream_no_image_message(raw_err or err_msg)
-                        return _attach_provider_trace(
+                        return finish(
                             {
                                 "success": False,
                                 "image_url": None,
@@ -512,7 +610,7 @@ class BananalabService:
                 raw_bytes, image_url = find_image_in_json(data)
                 if raw_bytes:
                     logger.info("[BANANALAB] Получены бинарные данные изображения, %s байт", len(raw_bytes))
-                    return _attach_provider_trace(
+                    return finish(
                         {
                             "success": True,
                             "image_url": image_url,
@@ -523,7 +621,7 @@ class BananalabService:
                     )
                 if image_url:
                     # Скачивание и сохранение в MinIO — в persist_generation_result (один раз, с ретраями).
-                    return _attach_provider_trace(
+                    return finish(
                         {
                             "success": True,
                             "image_url": image_url,
@@ -540,7 +638,7 @@ class BananalabService:
                     (data.get("result") if isinstance(data, dict) else None),
                     (data.get("error") if isinstance(data, dict) else None),
                 )
-                return _attach_provider_trace(
+                return finish(
                     {
                         "success": False,
                         "image_url": None,

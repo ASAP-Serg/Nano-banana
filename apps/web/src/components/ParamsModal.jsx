@@ -47,7 +47,7 @@ export default function ParamsModal({ item, onClose }) {
           {item.provider_cost_usd != null
             ? `${formatUsd(item.provider_cost_usd)} (как вернул Moonez)`
             : item.estimated_cost_usd != null
-              ? `~${formatUsd(item.estimated_cost_usd)} оценка (Pro 1K ≈ $0.03; сверка в кабинете Moonez по job id)`
+              ? `~${formatUsd(item.estimated_cost_usd)} оценка (Banana 2 1K ≈ $0.0335; точная цена в кабинете Moonez)`
               : "—"}
         </p>
         <p>

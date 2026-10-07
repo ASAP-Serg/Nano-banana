@@ -260,6 +260,7 @@ async def get_available_models(user: Annotated[TokenPayload, Depends(auth_servic
             "params_profile": entry.get("params_profile", "nano"),
             "group": entry.get("group") or entry.get("color", "replicate"),
             "available": key in unlocked,
+            "moonez_model": entry.get("moonez_model"),
         }
     default_model = DEFAULT_MODEL_ID if DEFAULT_MODEL_ID in unlocked else next(iter(unlocked), DEFAULT_MODEL_ID)
     return {

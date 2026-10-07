@@ -88,6 +88,10 @@ const GenerateForm = forwardRef(function GenerateForm({
   }, [defaultModel]);
 
   useEffect(() => {
+    if (modelName === "nano-banana" && resolution !== "1K") setResolution("1K");
+  }, [modelName, resolution]);
+
+  useEffect(() => {
     if (!models || Object.keys(models).length === 0) return;
     if (typeof keys.has_bananalab_key !== "boolean") return;
     if (models[modelName] && modelHasKey(models[modelName], keys)) return;
@@ -303,7 +307,12 @@ const GenerateForm = forwardRef(function GenerateForm({
                           <span className={`model-provider-badge model-badge-${m.color || "replicate"}`}>
                             {PROVIDER_BADGE[m.color] || m.color}
                           </span>
-                          <span className="model-dropdown-item-title">{m.display_name}</span>
+                          <span className="model-dropdown-item-copy">
+                            <span className="model-dropdown-item-title">{m.display_name}</span>
+                            {m.moonez_model ? (
+                              <span className="model-dropdown-item-sub">{m.moonez_model}</span>
+                            ) : null}
+                          </span>
                           {!enabled && (
                             <span className="model-dropdown-item-lock" title="Нужен API ключ">
                               <i className="fas fa-lock" />
@@ -435,8 +444,8 @@ const GenerateForm = forwardRef(function GenerateForm({
               <label className="form-label">Разрешение</label>
               <select className="form-select" value={resolution} onChange={(e) => setResolution(e.target.value)}>
                 <option>1K</option>
-                <option>2K</option>
-                <option>4K</option>
+                <option disabled={modelName === "nano-banana"}>2K</option>
+                <option disabled={modelName === "nano-banana"}>4K</option>
               </select>
             </div>
             <div className="col-6">

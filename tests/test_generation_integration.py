@@ -50,7 +50,10 @@ class TestImageModels(unittest.TestCase):
 
         keys = {"replicate": "", "bananalab": "bh_x", "openrouter": ""}
         unlocked = list(models_available_with_keys(keys))
-        self.assertEqual(unlocked, ["nano-banana-2", "nano-banana", "nano-banana-pro"])
+        self.assertEqual(
+            unlocked,
+            ["nano-banana-2.1", "nano-banana-2", "nano-banana", "nano-banana-pro"],
+        )
         self.assertGreater(len(MODEL_REGISTRY), len(unlocked))
 
 
@@ -523,13 +526,81 @@ class TestProviderTraceAndCost(unittest.TestCase):
         from nano_banana.generation.cost import estimate_cost_usd
 
         self.assertEqual(
-            estimate_cost_usd(model_name="nano-banana-pro", resolution="1K"),
-            0.03,
+            estimate_cost_usd(model_name="nano-banana-2", resolution="1K"),
+            0.0335,
+        )
+        self.assertEqual(
+            estimate_cost_usd(model_name="nano-banana-2.1", resolution="1K"),
+            0.0084,
         )
         self.assertEqual(
             estimate_cost_usd(model_name="nano-banana-pro", resolution="2K", reference_count=2),
-            round(0.03 * 1.6 + 0.004, 6),
+            round(0.08 * 1.6 + 0.004, 6),
         )
+
+    def test_moonez_unified_payload_maps_frontend_models(self):
+        from nano_banana.providers.moonez import (
+            build_generation_request,
+            is_unknown_moonez_model_error,
+            moonez_model_candidates,
+            moonez_upstream_model,
+        )
+
+        self.assertEqual(moonez_upstream_model("nano-banana"), "gemini-2.5-flash-image")
+        self.assertEqual(moonez_upstream_model("nano-banana-2"), "gemini-3.1-flash-image")
+        self.assertEqual(moonez_upstream_model("nano-banana-2.1"), "gemini-nano-banana-2.1")
+        self.assertEqual(moonez_upstream_model("nano-banana-pro"), "gemini-3-pro-image")
+        self.assertEqual(
+            moonez_model_candidates("nano-banana-2.1")[0],
+            "gemini-nano-banana-2.1",
+        )
+        self.assertIn("gemini-nano-banana-2.1-preview", moonez_model_candidates("nano-banana-2.1"))
+        self.assertTrue(is_unknown_moonez_model_error("Unknown model", 422))
+        self.assertFalse(is_unknown_moonez_model_error("rate limit", 429))
+
+        url, payload = build_generation_request(
+            "https://api.moonez.ai/api",
+            model_name="nano-banana-pro",
+            prompt="red panda",
+            aspect_ratio="1:1",
+            resolution="2K",
+        )
+        self.assertEqual(url, "https://api.moonez.ai/api/v1/generations")
+        self.assertEqual(payload["model"], "gemini-3-pro-image")
+        self.assertEqual(payload["resolution"], "2K")
+        self.assertNotIn("input_images_urls", payload)
+
+        _, banana = build_generation_request(
+            "https://api.moonez.ai/api",
+            model_name="nano-banana",
+            prompt="x",
+            aspect_ratio="1:1",
+            resolution="4K",
+        )
+        self.assertEqual(banana["model"], "gemini-2.5-flash-image")
+        self.assertEqual(banana["resolution"], "1K")
+
+        _, with_refs = build_generation_request(
+            "https://api.moonez.ai/api",
+            model_name="nano-banana-2",
+            prompt="edit",
+            aspect_ratio="auto",
+            resolution="1K",
+            input_images_urls=["https://example.com/a.png"],
+        )
+        self.assertEqual(with_refs["model"], "gemini-3.1-flash-image")
+        self.assertEqual(with_refs["input_images_urls"], ["https://example.com/a.png"])
+
+        _, v21 = build_generation_request(
+            "https://api.moonez.ai/api",
+            model_name="nano-banana-2.1",
+            prompt="x",
+            aspect_ratio="1:1",
+            resolution="2K",
+        )
+        self.assertEqual(v21["model"], "gemini-nano-banana-2.1")
+        self.assertEqual(v21["resolution"], "2K")
+
 
 if __name__ == "__main__":
     unittest.main()

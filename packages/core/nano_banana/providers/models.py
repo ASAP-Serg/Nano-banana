@@ -10,32 +10,49 @@ ImageApiProvider = Literal["replicate", "bananalab", "openrouter"]
 ProviderColor = Literal["bananalab", "replicate", "openrouter"]
 
 MODEL_REGISTRY: Dict[str, dict] = {
-    "nano-banana-2": {
-        "display_name": "Nano Banana 2",
-        "description": "Новая модель: качество Pro и скорость Flash (Moonez)",
+    "nano-banana-2.1": {
+        "display_name": "Nano Banana 2.1",
+        "description": "Moonez: gemini-nano-banana-2.1 — апдейт Banana 2 (Oct 2026), 1K/2K/4K. Скидка Moonez в кабинете.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
         "color": "bananalab",
         "group": "bananalab",
         "params_profile": "nano",
+        "moonez_model": "gemini-nano-banana-2.1",
+        "moonez_model_aliases": (
+            "gemini-nano-banana-2.1-preview",
+            "gemini-3.6-flash-image",
+        ),
+    },
+    "nano-banana-2": {
+        "display_name": "Nano Banana 2",
+        "description": "Moonez: gemini-3.1-flash-image — 1K/2K/4K. В кабинете линия 3.1-flash-image.",
+        "providers": ["bananalab"],
+        "provider_priority": ["bananalab"],
+        "color": "bananalab",
+        "group": "bananalab",
+        "params_profile": "nano",
+        "moonez_model": "gemini-3.1-flash-image",
     },
     "nano-banana": {
         "display_name": "Nano Banana",
-        "description": "Google image editing model in Gemini 2.5 (Moonez)",
+        "description": "Moonez: gemini-2.5-flash-image — только 1K. В кабинете линия 2.5-flash-image.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
         "color": "bananalab",
         "group": "bananalab",
         "params_profile": "nano",
+        "moonez_model": "gemini-2.5-flash-image",
     },
     "nano-banana-pro": {
         "display_name": "Nano Banana Pro",
-        "description": "State of the art image generation and editing (Moonez)",
+        "description": "Moonez: gemini-3-pro-image — 1K/2K/4K, топ. В кабинете линия 3-pro-image.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
         "color": "bananalab",
         "group": "bananalab",
         "params_profile": "nano",
+        "moonez_model": "gemini-3-pro-image",
     },
     "nano-banana-2-r8": {
         "display_name": "Nano Banana 2",
@@ -221,6 +238,15 @@ def model_display_name(model_id: Optional[str]) -> str:
     if entry:
         return str(entry.get("display_name") or model_id)
     return model_id or DEFAULT_MODEL_ID
+
+
+def moonez_slug(model_id: Optional[str]) -> Optional[str]:
+    """Google/Moonez id картинки: nano-banana-pro → gemini-3-pro-image."""
+    entry = get_model_entry(model_id)
+    if not entry:
+        return None
+    slug = entry.get("moonez_model")
+    return str(slug) if slug else None
 
 
 def openrouter_slug(model_id: Optional[str]) -> Optional[str]:
