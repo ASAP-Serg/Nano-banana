@@ -11,8 +11,8 @@ ProviderColor = Literal["bananalab", "replicate", "openrouter"]
 
 MODEL_REGISTRY: Dict[str, dict] = {
     "nano-banana-2.1": {
-        "display_name": "Nano Banana 2.1",
-        "description": "Moonez: gemini-nano-banana-2.1 — апдейт Banana 2 (Oct 2026), 1K/2K/4K. Скидка Moonez в кабинете.",
+        "display_name": "gemini-nano-banana-2.1",
+        "description": "Moonez/Google: gemini-nano-banana-2.1 (Oct 2026, линия 3.6 Flash). 1K/2K/4K. В публичных docs.moonez.ai пока три модели — шлём этот id + алиасы.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
         "color": "bananalab",
@@ -25,7 +25,7 @@ MODEL_REGISTRY: Dict[str, dict] = {
         ),
     },
     "nano-banana-2": {
-        "display_name": "Nano Banana 2",
+        "display_name": "gemini-3.1-flash-image",
         "description": "Moonez: gemini-3.1-flash-image — 1K/2K/4K. В кабинете линия 3.1-flash-image.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
@@ -35,7 +35,7 @@ MODEL_REGISTRY: Dict[str, dict] = {
         "moonez_model": "gemini-3.1-flash-image",
     },
     "nano-banana": {
-        "display_name": "Nano Banana",
+        "display_name": "gemini-2.5-flash-image",
         "description": "Moonez: gemini-2.5-flash-image — только 1K. В кабинете линия 2.5-flash-image.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
@@ -45,7 +45,7 @@ MODEL_REGISTRY: Dict[str, dict] = {
         "moonez_model": "gemini-2.5-flash-image",
     },
     "nano-banana-pro": {
-        "display_name": "Nano Banana Pro",
+        "display_name": "gemini-3-pro-image",
         "description": "Moonez: gemini-3-pro-image — 1K/2K/4K, топ. В кабинете линия 3-pro-image.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
