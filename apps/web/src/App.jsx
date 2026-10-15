@@ -178,7 +178,19 @@ export default function App() {
   async function applyFromId(id, opts) {
     try {
       const gen = await api.generation(id);
-      generateRef.current?.applyGeneration(gen, opts);
+      const hint = opts?.hint;
+      generateRef.current?.applyGeneration(
+        {
+          ...gen,
+          mosaic: gen?.mosaic || hint?.mosaic || gen?.generation_mode === "mosaic" || hint?.generation_mode === "mosaic",
+          mosaic_kind: gen?.mosaic_kind || hint?.mosaic_kind,
+          generation_mode:
+            gen?.generation_mode === "mosaic" || hint?.generation_mode === "mosaic" || hint?.mosaic
+              ? "mosaic"
+              : gen?.generation_mode,
+        },
+        opts
+      );
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
       toast(err.message, "error");
@@ -196,7 +208,7 @@ export default function App() {
       generateRef.current?.applyGeneration({
         ...gen,
         reference_images: refs.length ? refs : gen.reference_images,
-        generation_mode: refs.length ? "image-to-image" : gen.generation_mode,
+        generation_mode: gen.generation_mode === "mosaic" || gen.mosaic ? "mosaic" : refs.length ? "image-to-image" : gen.generation_mode,
       });
       document.getElementById("generate-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {
@@ -279,7 +291,7 @@ export default function App() {
                 if (li >= 0) setLightbox(li);
               }}
               onInfo={setInfoItem}
-              onReuse={(id) => applyFromId(id)}
+              onReuse={(item) => applyFromId(item.id, { hint: item })}
               onRetry={retryItem}
             />
           </div>

@@ -166,16 +166,26 @@ const GenerateForm = forwardRef(function GenerateForm({
         setModelName(nextModel);
         localStorage.setItem("nb_model", nextModel);
       }
-      const urls = gen.reference_images || [];
-      if (gen.generation_mode === "mosaic" || gen.mosaic) {
+      const urls = Array.isArray(gen.reference_images) ? gen.reference_images : [];
+      const mosaic =
+        gen.generation_mode === "mosaic" ||
+        gen.mosaic ||
+        !!gen.mosaic_kind ||
+        /virtual try-on|IMAGE 1 so the person|high-end commercial fashion photograph/i.test(gen.prompt || "");
+      if (mosaic) {
         const slots = [null, null, null, null];
         urls.slice(0, 4).forEach((url, index) => {
           slots[index] = { id: crypto.randomUUID(), dataUrl: url, name: "ref" };
         });
         setMosaicRefs(slots);
-        setMosaicKind(
-          ["combo", "synthetic", "synthetic_combo"].includes(gen.mosaic_kind) ? gen.mosaic_kind : "direct"
-        );
+        const kind = ["combo", "synthetic", "synthetic_combo"].includes(gen.mosaic_kind)
+          ? gen.mosaic_kind
+          : urls.length >= 4
+            ? "synthetic_combo"
+            : urls.length === 3
+              ? "combo"
+              : "direct";
+        setMosaicKind(kind);
         setMode("mosaic");
         setPrompt("");
       } else {

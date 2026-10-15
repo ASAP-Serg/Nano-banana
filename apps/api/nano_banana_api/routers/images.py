@@ -40,14 +40,20 @@ def _mosaic_label(kind: Optional[str]) -> str:
     }.get(kind or "", "Мозаика · комплект")
 
 
+def _is_mosaic_record(generation_mode: Optional[str], metadata: Optional[dict]) -> bool:
+    meta = metadata or {}
+    return generation_mode == "mosaic" or bool(meta.get("mosaic")) or bool(meta.get("mosaic_kind"))
+
+
 def _hide_mosaic_prompt(data: dict, metadata: dict, user: TokenPayload) -> dict:
-    if not metadata.get("mosaic"):
+    if not _is_mosaic_record(data.get("generation_mode"), metadata):
         return data
+    data["generation_mode"] = "mosaic"
     data["mosaic"] = True
-    data["mosaic_kind"] = metadata.get("mosaic_kind")
+    data["mosaic_kind"] = metadata.get("mosaic_kind") or data.get("mosaic_kind")
     if user.is_admin:
         return data
-    data["prompt"] = _mosaic_label(metadata.get("mosaic_kind"))
+    data["prompt"] = _mosaic_label(data.get("mosaic_kind"))
     data["negative_prompt"] = None
     for key in ("original_prompt", "sanitized_prompt", "rewritten_prompt", "sanitize_replacements"):
         data[key] = None

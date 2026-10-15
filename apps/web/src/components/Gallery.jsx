@@ -103,7 +103,7 @@ export default function Gallery({
                     <IconButton
                       className="btn btn-icon-only btn-edit btn-sm"
                       title="В форму"
-                      onClick={() => onReuse(item.id)}
+                      onClick={() => onReuse(item)}
                     >
                       <IconToForm />
                     </IconButton>
