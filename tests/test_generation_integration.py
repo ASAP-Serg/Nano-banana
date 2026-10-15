@@ -52,7 +52,13 @@ class TestImageModels(unittest.TestCase):
         unlocked = list(models_available_with_keys(keys))
         self.assertEqual(
             unlocked,
-            ["nano-banana-2.1", "nano-banana-2", "nano-banana", "nano-banana-pro"],
+            [
+                "nano-banana-2.1",
+                "nano-banana-2",
+                "nano-banana-2-lite",
+                "nano-banana",
+                "nano-banana-pro",
+            ],
         )
         self.assertGreater(len(MODEL_REGISTRY), len(unlocked))
 
@@ -584,6 +590,25 @@ class TestProviderTraceAndCost(unittest.TestCase):
         )
         self.assertEqual(banana["model"], "gemini-2.5-flash-image")
         self.assertEqual(banana["resolution"], "1K")
+
+        _, wide = build_generation_request(
+            "https://api.moonez.ai/api",
+            model_name="nano-banana",
+            prompt="x",
+            aspect_ratio="1:8",
+            resolution="1K",
+        )
+        self.assertEqual(wide["aspect_ratio"], "1:1")
+
+        _, lite = build_generation_request(
+            "https://api.moonez.ai/api",
+            model_name="nano-banana-2-lite",
+            prompt="x",
+            aspect_ratio="16:9",
+            resolution="4K",
+        )
+        self.assertEqual(lite["model"], "gemini-3.1-flash-lite-image")
+        self.assertEqual(lite["resolution"], "1K")
 
         _, with_refs = build_generation_request(
             "https://api.moonez.ai/api",

@@ -10,6 +10,7 @@ from typing import Optional
 MODEL_USD = {
     "nano-banana": 0.10,
     "nano-banana-2": 0.0335,
+    "nano-banana-2-lite": 0.02,
     "nano-banana-2.1": 0.0084,
     "nano-banana-pro": 0.0678,
     "nano-banana-2-r8": 0.02,
@@ -17,6 +18,7 @@ MODEL_USD = {
     "nano-banana-pro-r8": 0.03,
     "gemini-2.5-flash-image": 0.10,
     "gemini-3.1-flash-image": 0.0335,
+    "gemini-3.1-flash-lite-image": 0.02,
     "gemini-nano-banana-2.1": 0.0084,
     "gemini-3-pro-image": 0.0678,
     "imagen-4": 0.04,

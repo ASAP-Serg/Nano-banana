@@ -12,7 +12,7 @@ ProviderColor = Literal["bananalab", "replicate", "openrouter"]
 MODEL_REGISTRY: Dict[str, dict] = {
     "nano-banana-2.1": {
         "display_name": "gemini-nano-banana-2.1",
-        "description": "Moonez/Google: gemini-nano-banana-2.1 (Oct 2026, линия 3.6 Flash). 1K/2K/4K. В публичных docs.moonez.ai пока три модели — шлём этот id + алиасы.",
+        "description": "Moonez: gemini-nano-banana-2.1 — 1K/2K/4K. Без суффикса -preview.",
         "providers": ["bananalab"],
         "provider_priority": ["bananalab"],
         "color": "bananalab",
@@ -29,6 +29,16 @@ MODEL_REGISTRY: Dict[str, dict] = {
         "group": "bananalab",
         "params_profile": "nano",
         "moonez_model": "gemini-3.1-flash-image",
+    },
+    "nano-banana-2-lite": {
+        "display_name": "gemini-3.1-flash-lite-image",
+        "description": "Moonez: gemini-3.1-flash-lite-image — только 1K. Отдельное право ключа, не алиас 3.1-flash-image.",
+        "providers": ["bananalab"],
+        "provider_priority": ["bananalab"],
+        "color": "bananalab",
+        "group": "bananalab",
+        "params_profile": "nano",
+        "moonez_model": "gemini-3.1-flash-lite-image",
     },
     "nano-banana": {
         "display_name": "gemini-2.5-flash-image",

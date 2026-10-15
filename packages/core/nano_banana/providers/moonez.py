@@ -110,6 +110,9 @@ def _all_moonez_upstream_ids() -> frozenset:
 
 MOONEZ_UPSTREAM_IDS = _all_moonez_upstream_ids()
 _FLASH_25 = "gemini-2.5-flash-image"
+_FLASH_LITE = "gemini-3.1-flash-lite-image"
+# docs.moonez.ai/concepts/aspect-ratios: 2.5 не принимает крайние панорамы.
+_FLASH_25_BLOCKED_ASPECTS = frozenset({"1:4", "1:8", "4:1", "8:1"})
 
 
 def moonez_upstream_model(model_name: Optional[str]) -> str:
@@ -157,10 +160,18 @@ def is_unknown_moonez_model_error(message: Any, http_status: Optional[int] = Non
 
 
 def _resolution_for_upstream(upstream: str, resolution: str) -> str:
-    if upstream == _FLASH_25:
+    # 2.5 и Lite: только 1K. 2K/4K у Lite не сконфигурированы.
+    if upstream in (_FLASH_25, _FLASH_LITE):
         return "1K"
     value = (resolution or "1K").upper()
     return value if value in ("1K", "2K", "4K") else "1K"
+
+
+def _aspect_for_upstream(upstream: str, aspect_ratio: str) -> str:
+    value = (aspect_ratio or "1:1").strip() or "1:1"
+    if upstream == _FLASH_25 and value in _FLASH_25_BLOCKED_ASPECTS:
+        return "1:1"
+    return value
 
 
 def build_generation_request(
@@ -179,7 +190,7 @@ def build_generation_request(
     payload: Dict[str, Any] = {
         "model": chosen,
         "prompt": prompt,
-        "aspect_ratio": aspect_ratio or "1:1",
+        "aspect_ratio": _aspect_for_upstream(chosen, aspect_ratio),
         "resolution": _resolution_for_upstream(chosen, resolution),
     }
     if input_images_base64:
