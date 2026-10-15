@@ -9,8 +9,14 @@ from typing import Dict, List, Optional
 from nano_banana.providers.models import moonez_slug
 
 _CONFIG_DIR = Path(__file__).resolve().parent / "configs"
-MODES = ("direct", "combo")
-VARIANTS = ("default", "3_pro", "2.5_flash", "3.1_flash")
+MODES = ("direct", "combo", "synthetic", "synthetic_combo")
+VARIANTS = ("default", "3_pro", "2.5_flash", "3.1_flash", "prompt")
+MODE_IMAGE_COUNT = {
+    "direct": 2,
+    "combo": 3,
+    "synthetic": 3,
+    "synthetic_combo": 4,
+}
 
 
 def variant_for_model(model_name: Optional[str]) -> Optional[str]:
@@ -26,7 +32,7 @@ def variant_for_model(model_name: Optional[str]) -> Optional[str]:
     return None
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=8)
 def _file_prompts(mode: str) -> Dict[str, str]:
     path = _CONFIG_DIR / f"{mode}.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -48,28 +54,36 @@ def bundled_prompts(mode: str) -> Dict[str, str]:
     return dict(_file_prompts(mode))
 
 
-def resolve_mosaic_prompt(mode: str, model_name: Optional[str], overrides: Optional[Dict[str, str]] = None) -> tuple[str, str]:
-    """Как в ТЗ: prompt:{variant} → prompt:default → prompt. overrides: variant → текст админа."""
+PROMPT_PICKS = ("3_pro", "2.5_flash", "3.1_flash")
+
+
+def resolve_mosaic_prompt(
+    mode: str,
+    variant: Optional[str] = None,
+    overrides: Optional[Dict[str, str]] = None,
+) -> tuple[str, str]:
+    """Пункт как в мозаике: 3_pro / 2.5_flash / 3.1_flash. Синтетика — один prompt."""
     prompts = bundled_prompts(mode)
     if overrides:
-        for variant, text in overrides.items():
+        for key, text in overrides.items():
             if text and str(text).strip():
-                prompts[variant] = str(text).strip()
-    variant = variant_for_model(model_name)
-    if variant and prompts.get(variant):
-        return prompts[variant], variant
-    if prompts.get("default"):
-        return prompts["default"], "default"
+                prompts[key] = str(text).strip()
+    pick = (variant or "3_pro").strip()
+    if pick in prompts and prompts[pick]:
+        return prompts[pick], pick
     if prompts.get("prompt"):
         return prompts["prompt"], "prompt"
+    if prompts.get("default"):
+        return prompts["default"], "default"
     raise ValueError("В конфиге мозаики нет промпта для этого режима")
 
 
 def list_prompt_slots() -> List[dict]:
     rows = []
     for mode in MODES:
+        bundled = bundled_prompts(mode)
         for variant in VARIANTS:
-            base = bundled_prompts(mode).get(variant)
+            base = bundled.get(variant)
             if not base:
                 continue
             rows.append({"mode": mode, "variant": variant, "body": base})

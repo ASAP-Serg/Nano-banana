@@ -1,0 +1,21 @@
+{
+  "name": "Gemini Combo Syntetic V1",
+  "shape_version": 8,
+  "pose_catalog": {
+    "male": "male_universal_v7",
+    "female": "female_universal_v7"
+  },
+  "pose_catalog_np": {
+    "male": "male_universal_v7_np",
+    "female": "female_universal_v7_np"
+  },
+  "parameters": [
+    {
+      "gemini": {
+        "aspect_ratio": "9:16",
+        "image_size": "1K",
+        "prompt": "Generate a photorealistic, high-end commercial fashion photograph on a pure white background. [Source Mapping] 1. IDENTITY: Use the facial features, head structure, and skin tone strictly from the provided <person> image. 2. ANATOMY & POSE: Use the exact body proportions, stance, and limb positioning from the provided <body shape> image. 3. GARMENT: The subject is wearing the provided <clothing> image. [Execution Logic] Composite the head of <person> seamlessly onto the body of <body shape>. Warp and drape the <clothing> to fit the specific volume and muscles of <body shape> naturally. Ensure realistic fabric physics—create tension folds where the body stretches and natural slack where it relaxes. [Lighting & Style] Uniform softbox studio lighting, high contrast, sharp focus, 8k resolution. No floating artifacts."
+      }
+    }
+  ]
+}

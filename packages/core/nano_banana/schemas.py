@@ -195,7 +195,8 @@ class ImageGenerationRequest(BaseModel):
     reference_images: Optional[List[str]] = None
     model_name: Optional[str] = None
     rewrite_prompt: Optional[bool] = False
-    mosaic_kind: Optional[str] = None  # direct | combo, только для generation_mode=mosaic
+    mosaic_kind: Optional[str] = None
+    mosaic_variant: Optional[str] = None  # 3_pro | 2.5_flash | 3.1_flash
 
     @field_validator("prompt")
     @classmethod
@@ -285,6 +286,16 @@ class ImageGenerationRequest(BaseModel):
         if kind not in {"direct", "combo", "synthetic", "synthetic_combo"}:
             raise ValueError("Режим мозаики: примерка или синтетика")
         return kind
+
+    @field_validator("mosaic_variant")
+    @classmethod
+    def validate_mosaic_variant(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        variant = v.strip()
+        if variant not in {"3_pro", "2.5_flash", "3.1_flash"}:
+            raise ValueError("Промпт мозаики: 3 pro, 2.5 flash или 3.1 flash")
+        return variant
 
     @field_validator("reference_images")
     @classmethod

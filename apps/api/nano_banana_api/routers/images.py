@@ -17,7 +17,7 @@ from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
 from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.generation.processor import MAX_GENERATION_RETRIES, get_fallback_model, rewrite_metadata_fields
 from nano_banana.generation.references import store_reference_images
-from nano_banana.mosaic.prompts import resolve_mosaic_prompt
+from nano_banana.mosaic.prompts import MODE_IMAGE_COUNT, resolve_mosaic_prompt
 from nano_banana.providers.models import DEFAULT_MODEL_ID, MODEL_REGISTRY, get_model_entry, get_provider_for_model, models_available_with_keys
 from nano_banana.queue.jobs import get_job_queue
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
@@ -33,7 +33,11 @@ _minio: Optional[MinioService] = None
 
 
 def _mosaic_label(kind: Optional[str]) -> str:
-    return "Мозаика · верх и низ" if kind == "combo" else "Мозаика · комплект"
+    return {
+        "combo": "Мозаика · верх и низ",
+        "synthetic": "Мозаика · синтетика",
+        "synthetic_combo": "Мозаика · синтетика, верх и низ",
+    }.get(kind or "", "Мозаика · комплект")
 
 
 def _hide_mosaic_prompt(data: dict, metadata: dict, user: TokenPayload) -> dict:
@@ -109,16 +113,16 @@ async def generate_image(
         if body.generation_mode == "mosaic":
             if not user.is_operator and not user.is_admin:
                 raise HTTPException(status_code=403, detail="Режим мозаики только для операторов")
-            if body.mosaic_kind not in {"direct", "combo"}:
-                raise HTTPException(status_code=400, detail="Выберите комплект или верх и низ")
-            expected = 3 if body.mosaic_kind == "combo" else 2
+            if body.mosaic_kind not in MODE_IMAGE_COUNT:
+                raise HTTPException(status_code=400, detail="Выберите режим мозаики")
+            expected = MODE_IMAGE_COUNT[body.mosaic_kind]
             refs = body.reference_images or []
             if len(refs) != expected:
-                detail = (
-                    "Нужны фото человека, верха и низа"
-                    if body.mosaic_kind == "combo"
-                    else "Нужны фото человека и комплекта"
-                )
+                detail = {
+                    "combo": "Нужны фото человека, верха и низа",
+                    "synthetic": "Нужны фото лица, позы и одежды",
+                    "synthetic_combo": "Нужны фото лица, позы, верха и низа",
+                }.get(body.mosaic_kind, "Нужны фото человека и комплекта")
                 raise HTTPException(status_code=400, detail=detail)
             with db_service.get_session() as session:
                 overrides = {
@@ -126,7 +130,11 @@ async def generate_image(
                     for row in session.query(MosaicPrompt).filter(MosaicPrompt.mode == body.mosaic_kind).all()
                     if row.body and str(row.body).strip()
                 }
-            prompt_text, variant = resolve_mosaic_prompt(body.mosaic_kind, selected_model, overrides)
+            prompt_text, variant = resolve_mosaic_prompt(
+                body.mosaic_kind,
+                body.mosaic_variant or "3_pro",
+                overrides,
+            )
             body = body.model_copy(
                 update={
                     "negative_prompt": None,

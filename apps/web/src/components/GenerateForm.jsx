@@ -70,7 +70,8 @@ const GenerateForm = forwardRef(function GenerateForm({
 }, ref) {
   const [mode, setMode] = useState("text-to-image");
   const [mosaicKind, setMosaicKind] = useState("direct");
-  const [mosaicRefs, setMosaicRefs] = useState([null, null, null]);
+  const [mosaicVariant, setMosaicVariant] = useState("3_pro");
+  const [mosaicRefs, setMosaicRefs] = useState([null, null, null, null]);
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const canMosaic = Boolean(user?.is_operator || user?.is_admin);
@@ -93,7 +94,9 @@ const GenerateForm = forwardRef(function GenerateForm({
   }, [defaultModel]);
 
   useEffect(() => {
-    if (modelName === "nano-banana" && resolution !== "1K") setResolution("1K");
+    if ((modelName === "nano-banana" || modelName === "nano-banana-2-lite") && resolution !== "1K") {
+      setResolution("1K");
+    }
   }, [modelName, resolution]);
 
   useEffect(() => {
@@ -166,12 +169,14 @@ const GenerateForm = forwardRef(function GenerateForm({
       }
       const urls = gen.reference_images || [];
       if (gen.generation_mode === "mosaic" || gen.mosaic) {
-        const slots = [null, null, null];
-        urls.slice(0, 3).forEach((url, index) => {
+        const slots = [null, null, null, null];
+        urls.slice(0, 4).forEach((url, index) => {
           slots[index] = { id: crypto.randomUUID(), dataUrl: url, name: "ref" };
         });
         setMosaicRefs(slots);
-        setMosaicKind(gen.mosaic_kind === "combo" ? "combo" : "direct");
+        setMosaicKind(
+          ["combo", "synthetic", "synthetic_combo"].includes(gen.mosaic_kind) ? gen.mosaic_kind : "direct"
+        );
         setMode("mosaic");
         setPrompt("");
       } else {
@@ -250,10 +255,10 @@ const GenerateForm = forwardRef(function GenerateForm({
       return;
     }
     if (mode === "mosaic") {
-      const need = mosaicKind === "combo" ? 3 : 2;
-      const shots = mosaicRefs.slice(0, need);
+      const slotCount = { direct: 2, combo: 3, synthetic: 3, synthetic_combo: 4 }[mosaicKind] || 2;
+      const shots = mosaicRefs.slice(0, slotCount);
       if (shots.some((item) => !item?.dataUrl)) {
-        toast(mosaicKind === "combo" ? "Нужны человек, верх и низ" : "Нужны человек и комплект", "error");
+        toast("Заполните все фото этого режима, для синтетики нужна поза", "error");
         return;
       }
       await onGenerate({
@@ -261,6 +266,7 @@ const GenerateForm = forwardRef(function GenerateForm({
         negative_prompt: null,
         generation_mode: "mosaic",
         mosaic_kind: mosaicKind,
+        mosaic_variant: mosaicVariant,
         model_name: modelName,
         resolution: "1K",
         aspect_ratio: "9:16",
@@ -466,26 +472,70 @@ const GenerateForm = forwardRef(function GenerateForm({
             </div>
           )}
           {mode === "mosaic" && (
-            <div className="mb-3">
-              <div className="btn-group mb-2">
-                <button
-                  type="button"
-                  className={`btn btn-sm ${mosaicKind === "direct" ? "btn-primary" : "btn-outline-primary"}`}
-                  onClick={() => setMosaicKind("direct")}
-                >
-                  Комплект
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${mosaicKind === "combo" ? "btn-primary" : "btn-outline-primary"}`}
-                  onClick={() => setMosaicKind("combo")}
-                >
-                  Верх и низ
-                </button>
+            <div
+              className="mb-3"
+              tabIndex={0}
+              onPaste={(e) => {
+                const files = imageFilesFromClipboardEvent(e);
+                if (!files.length) return;
+                e.preventDefault();
+                e.stopPropagation();
+                void (async () => {
+                  const extra = await collectImageFiles(files);
+                  if (!extra.length) return;
+                  setMosaicRefs((prev) => {
+                    const next = [...prev];
+                    let cursor = 0;
+                    for (const file of extra) {
+                      while (cursor < next.length && next[cursor]) cursor += 1;
+                      if (cursor >= next.length) break;
+                      next[cursor] = file;
+                      cursor += 1;
+                    }
+                    return next;
+                  });
+                })();
+              }}
+            >
+              <div className="btn-group mb-2 flex-wrap">
+                {[
+                  ["direct", "Transfer"],
+                  ["combo", "Transfer Combo"],
+                  ["synthetic", "Synthetic"],
+                  ["synthetic_combo", "Synthetic Combo"],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`btn btn-sm ${mosaicKind === id ? "btn-primary" : "btn-outline-primary"}`}
+                    onClick={() => setMosaicKind(id)}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-              <p className="small text-muted">Порядок фото фиксирован. Кадр 9:16, размер 1K. Промпт подставляет сервер.</p>
+              <label className="form-label">Промпт</label>
+              <select
+                className="form-select mb-2"
+                value={mosaicVariant}
+                onChange={(e) => setMosaicVariant(e.target.value)}
+              >
+                <option value="3_pro">3 pro</option>
+                <option value="2.5_flash">2.5 flash</option>
+                <option value="3.1_flash">3.1 flash</option>
+              </select>
+              <p className="small text-muted">
+                Четыре стиля, текст берётся по этому пункту. Картинку рисует модель выше, из твоих ключей.
+                Ctrl+V вставляет фото в первый пустой слот.
+                {mosaicKind.startsWith("synthetic") ? " Поза — отдельное фото тела." : ""}
+              </p>
               <div className="d-flex flex-wrap gap-3">
-                {(mosaicKind === "combo" ? ["Человек", "Верх", "Низ"] : ["Человек", "Комплект"]).map((label, index) => (
+                {({
+                  direct: ["Человек", "Комплект"],
+                  combo: ["Человек", "Верх", "Низ"],
+                  synthetic: ["Лицо", "Поза", "Одежда"],
+                  synthetic_combo: ["Лицо", "Поза", "Верх", "Низ"],
+                }[mosaicKind] || ["Человек", "Комплект"]).map((label, index) => (
                   <div key={label}>
                     <div className="form-label">{label}</div>
                     {mosaicRefs[index] ? (
@@ -568,8 +618,8 @@ const GenerateForm = forwardRef(function GenerateForm({
               <label className="form-label">Разрешение</label>
               <select className="form-select" value={resolution} onChange={(e) => setResolution(e.target.value)}>
                 <option>1K</option>
-                <option disabled={modelName === "nano-banana"}>2K</option>
-                <option disabled={modelName === "nano-banana"}>4K</option>
+                <option disabled={modelName === "nano-banana" || modelName === "nano-banana-2-lite"}>2K</option>
+                <option disabled={modelName === "nano-banana" || modelName === "nano-banana-2-lite"}>4K</option>
               </select>
             </div>
             <div className="col-6">
