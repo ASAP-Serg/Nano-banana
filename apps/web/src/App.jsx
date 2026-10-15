@@ -200,15 +200,16 @@ export default function App() {
   async function applyAdmin(id) {
     try {
       const gen = await api.adminGeneration(id);
+      const mosaic = gen.generation_mode === "mosaic" || gen.mosaic || gen.mosaic_kind;
       const refs = [];
-      if (gen.result_url) refs.push(gen.result_url);
+      if (!mosaic && gen.result_url) refs.push(gen.result_url);
       for (const url of gen.reference_images || []) {
         if (url && !refs.includes(url) && refs.length < 4) refs.push(url);
       }
       generateRef.current?.applyGeneration({
         ...gen,
-        reference_images: refs.length ? refs : gen.reference_images,
-        generation_mode: gen.generation_mode === "mosaic" || gen.mosaic ? "mosaic" : refs.length ? "image-to-image" : gen.generation_mode,
+        reference_images: mosaic ? gen.reference_images || [] : refs.length ? refs : gen.reference_images,
+        generation_mode: mosaic ? "mosaic" : refs.length ? "image-to-image" : gen.generation_mode,
       });
       document.getElementById("generate-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {

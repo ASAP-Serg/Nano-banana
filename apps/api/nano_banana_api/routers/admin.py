@@ -120,6 +120,8 @@ def _generation_full_payload(gen: Generation, username: Optional[str] = None) ->
         "model_name": model_name,
         "reference_images": client_reference_urls(gen),
         "result_url": client_result_url(gen),
+        "mosaic": gen.generation_mode == "mosaic" or bool(metadata.get("mosaic")),
+        "mosaic_kind": metadata.get("mosaic_kind"),
         "status": gen.status,
         "error_message": metadata.get("error"),
         "provider": _infer_provider(gen),
