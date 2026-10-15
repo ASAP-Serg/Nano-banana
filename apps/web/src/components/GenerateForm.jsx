@@ -7,7 +7,7 @@ const MAX_REF_COUNT = 4;
 const MAX_REF_BYTES = 20 * 1024 * 1024;
 const MAX_PROMPT_LENGTH = 4000;
 const MAX_NEGATIVE_LENGTH = 2000;
-const ALLOWED_REF_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const ALLOWED_REF_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif"]);
 
 function modelHasKey(meta, keys) {
   const ready = typeof keys?.has_bananalab_key === "boolean";
@@ -149,8 +149,8 @@ const GenerateForm = forwardRef(function GenerateForm({
         setMode("image-to-image");
       })();
     };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
+    window.addEventListener("paste", onPaste, true);
+    return () => window.removeEventListener("paste", onPaste, true);
   }, []);
 
   useImperativeHandle(ref, () => ({
@@ -221,6 +221,41 @@ const GenerateForm = forwardRef(function GenerateForm({
       next.splice(to, 0, moved);
       return next;
     });
+  }
+
+  async function pasteMosaicClipboard() {
+    try {
+      if (!navigator.clipboard?.read) {
+        toast("Этот браузер не отдаёт картинку из буфера по кнопке. Скопируй изображение и нажми Ctrl+V.", "error");
+        return;
+      }
+      const items = await navigator.clipboard.read();
+      const files = [];
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        files.push(new File([blob], "clipboard.png", { type: type || "image/png" }));
+      }
+      const extra = await collectImageFiles(files);
+      if (!extra.length) {
+        toast("В буфере нет изображения", "error");
+        return;
+      }
+      setMosaicRefs((prev) => {
+        const next = [...prev];
+        let cursor = 0;
+        for (const file of extra) {
+          while (cursor < next.length && next[cursor]) cursor += 1;
+          if (cursor >= next.length) break;
+          next[cursor] = file;
+          cursor += 1;
+        }
+        return next;
+      });
+    } catch (err) {
+      toast(err.message || "Не удалось вставить изображение", "error");
+    }
   }
 
   async function pasteRefs() {
@@ -526,9 +561,12 @@ const GenerateForm = forwardRef(function GenerateForm({
               </select>
               <p className="small text-muted">
                 Четыре стиля, текст берётся по этому пункту. Картинку рисует модель выше, из твоих ключей.
-                Ctrl+V вставляет фото в первый пустой слот.
+                Ctrl+V или кнопка ниже вставляет фото в первый пустой слот.
                 {mosaicKind.startsWith("synthetic") ? " Поза — отдельное фото тела." : ""}
               </p>
+              <button type="button" className="btn btn-sm btn-outline-secondary mb-3" onClick={pasteMosaicClipboard}>
+                Вставить из буфера
+              </button>
               <div className="d-flex flex-wrap gap-3">
                 {({
                   direct: ["Человек", "Комплект"],
