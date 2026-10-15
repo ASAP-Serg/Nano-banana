@@ -70,7 +70,6 @@ const GenerateForm = forwardRef(function GenerateForm({
 }, ref) {
   const [mode, setMode] = useState("text-to-image");
   const [mosaicKind, setMosaicKind] = useState("direct");
-  const [mosaicVariant, setMosaicVariant] = useState("3_pro");
   const [mosaicRefs, setMosaicRefs] = useState([null, null, null, null]);
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -301,7 +300,6 @@ const GenerateForm = forwardRef(function GenerateForm({
         negative_prompt: null,
         generation_mode: "mosaic",
         mosaic_kind: mosaicKind,
-        mosaic_variant: mosaicVariant,
         model_name: modelName,
         resolution: "1K",
         aspect_ratio: "9:16",
@@ -549,18 +547,8 @@ const GenerateForm = forwardRef(function GenerateForm({
                   </button>
                 ))}
               </div>
-              <label className="form-label">Промпт</label>
-              <select
-                className="form-select mb-2"
-                value={mosaicVariant}
-                onChange={(e) => setMosaicVariant(e.target.value)}
-              >
-                <option value="3_pro">3 pro</option>
-                <option value="2.5_flash">2.5 flash</option>
-                <option value="3.1_flash">3.1 flash</option>
-              </select>
               <p className="small text-muted">
-                Четыре стиля, текст берётся по этому пункту. Картинку рисует модель выше, из твоих ключей.
+                Текст стиля один. Рисует модель, выбранная выше, любая из твоих ключей.
                 Ctrl+V или кнопка ниже вставляет фото в первый пустой слот.
                 {mosaicKind.startsWith("synthetic") ? " Поза — отдельное фото тела." : ""}
               </p>

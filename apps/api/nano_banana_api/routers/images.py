@@ -130,11 +130,7 @@ async def generate_image(
                     for row in session.query(MosaicPrompt).filter(MosaicPrompt.mode == body.mosaic_kind).all()
                     if row.body and str(row.body).strip()
                 }
-            prompt_text, variant = resolve_mosaic_prompt(
-                body.mosaic_kind,
-                body.mosaic_variant or "3_pro",
-                overrides,
-            )
+            prompt_text, variant = resolve_mosaic_prompt(body.mosaic_kind, overrides)
             body = body.model_copy(
                 update={
                     "negative_prompt": None,

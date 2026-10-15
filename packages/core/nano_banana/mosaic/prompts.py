@@ -57,20 +57,17 @@ def bundled_prompts(mode: str) -> Dict[str, str]:
 PROMPT_PICKS = ("3_pro", "2.5_flash", "3.1_flash")
 
 
-def resolve_mosaic_prompt(
-    mode: str,
-    variant: Optional[str] = None,
-    overrides: Optional[Dict[str, str]] = None,
-) -> tuple[str, str]:
-    """Пункт как в мозаике: 3_pro / 2.5_flash / 3.1_flash. Синтетика — один prompt."""
+def resolve_mosaic_prompt(mode: str, overrides: Optional[Dict[str, str]] = None) -> tuple[str, str]:
+    """Один текст на стиль. Модель генерации сюда не входит — её выбирает пользователь."""
     prompts = bundled_prompts(mode)
     if overrides:
         for key, text in overrides.items():
             if text and str(text).strip():
                 prompts[key] = str(text).strip()
-    pick = (variant or "3_pro").strip()
-    if pick in prompts and prompts[pick]:
-        return prompts[pick], pick
+    if mode in {"synthetic", "synthetic_combo"} and prompts.get("prompt"):
+        return prompts["prompt"], "prompt"
+    if prompts.get("3_pro"):
+        return prompts["3_pro"], "3_pro"
     if prompts.get("prompt"):
         return prompts["prompt"], "prompt"
     if prompts.get("default"):
