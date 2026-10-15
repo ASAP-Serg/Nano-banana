@@ -1185,16 +1185,18 @@ button.info-btn:hover,
     font-size: 0.78rem;
 }
 
-.mosaic-mark {
-    display: flex;
-    align-items: center;
-    margin-bottom: 0.35rem;
-}
-
-.mosaic-mark img {
-    width: 18px;
-    height: 18px;
-    display: block;
+.media-thumb > .mosaic-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 2;
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+    object-fit: contain;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.55);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
 
 .gallery-card-wrap > .card,

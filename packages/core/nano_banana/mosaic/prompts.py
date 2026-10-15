@@ -75,13 +75,20 @@ def resolve_mosaic_prompt(mode: str, overrides: Optional[Dict[str, str]] = None)
     raise ValueError("В конфиге мозаики нет промпта для этого режима")
 
 
+STYLE_PROMPT = {
+    "direct": "3_pro",
+    "combo": "3_pro",
+    "synthetic": "prompt",
+    "synthetic_combo": "prompt",
+}
+
+
 def list_prompt_slots() -> List[dict]:
+    """Четыре стиля, по одному целому тексту. Так их можно заменить копипастой из мозаики."""
     rows = []
     for mode in MODES:
         bundled = bundled_prompts(mode)
-        for variant in VARIANTS:
-            base = bundled.get(variant)
-            if not base:
-                continue
-            rows.append({"mode": mode, "variant": variant, "body": base})
+        variant = STYLE_PROMPT[mode]
+        body = bundled.get(variant) or bundled.get("prompt") or bundled.get("3_pro") or bundled.get("default") or ""
+        rows.append({"mode": mode, "variant": variant, "body": body})
     return rows

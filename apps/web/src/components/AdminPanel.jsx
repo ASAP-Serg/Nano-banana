@@ -155,12 +155,11 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                   <div className="mb-3" key={`${slot.mode}-${slot.variant}`}>
                     <label className="form-label">
                       {{
-                        direct: "Комплект",
-                        combo: "Верх и низ",
-                        synthetic: "Синтетика",
-                        synthetic_combo: "Синтетика верх и низ",
-                      }[slot.mode] || slot.mode}{" "}
-                      · {slot.variant}
+                        direct: "Transfer",
+                        combo: "Transfer Combo",
+                        synthetic: "Synthetic",
+                        synthetic_combo: "Synthetic Combo",
+                      }[slot.mode] || slot.mode}
                       {slot.custom ? " · изменён" : ""}
                     </label>
                     <textarea

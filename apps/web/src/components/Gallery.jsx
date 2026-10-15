@@ -39,6 +39,9 @@ export default function Gallery({
             <div className="gallery-card-wrap" key={item.id}>
               <div className="card">
                 <div className="media-thumb">
+                  {item.mosaic && (
+                    <img className="mosaic-badge" src="/icons/mosaica.svg" alt="Мозаика" title="Мозаика" />
+                  )}
                   {item.result_url && isSafeMediaUrl(item.result_url) ? (
                     <img
                       src={item.result_url}
@@ -56,12 +59,15 @@ export default function Gallery({
                   )}
                 </div>
                 <div className="card-body">
-                  {item.mosaic && (
-                    <div className="mosaic-mark" title="Мозаика">
-                      <img src="/icons/mosaica.svg" alt="" />
-                    </div>
-                  )}
-                  <p className="small mb-1 prompt-text">{item.prompt}</p>
+                  <p className="small mb-1 prompt-text">
+                    {item.mosaic
+                      ? {
+                          combo: "Мозаика · Transfer Combo",
+                          synthetic: "Мозаика · Synthetic",
+                          synthetic_combo: "Мозаика · Synthetic Combo",
+                        }[item.mosaic_kind] || "Мозаика · Transfer"
+                      : item.prompt}
+                  </p>
                   <div className="small text-muted">
                     #{item.id} · {item.model_name} · {statusLabel(item)}
                     {item.provider ? ` · ${PROVIDER_BADGE[item.provider] || item.provider}` : ""}
