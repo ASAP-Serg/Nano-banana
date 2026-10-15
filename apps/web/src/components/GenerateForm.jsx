@@ -534,6 +534,7 @@ const GenerateForm = forwardRef(function GenerateForm({
           </div>
           )}
           {mode !== "mosaic" && (
+          <>
           <div className="form-check mb-3">
             <input
               className="form-check-input"
@@ -559,6 +560,7 @@ const GenerateForm = forwardRef(function GenerateForm({
               onChange={(e) => setNegative(e.target.value.slice(0, MAX_NEGATIVE_LENGTH))}
             />
           </div>
+          </>
           )}
           {mode !== "mosaic" && (
           <div className="row mb-3">
