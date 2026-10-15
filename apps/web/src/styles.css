@@ -1069,6 +1069,28 @@ button.info-btn:hover,
     overflow: visible;
 }
 
+.admin-shell .table,
+.admin-shell .table th,
+.admin-shell .table td {
+    color: var(--foreground);
+}
+
+.admin-shell tr.table-warning,
+.admin-shell tr.table-warning > td {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--foreground);
+    background: color-mix(in srgb, #ff9f0a 16%, var(--card)) !important;
+    color: var(--foreground) !important;
+}
+
+.admin-shell .btn-outline-primary,
+.admin-shell .btn-outline-secondary,
+.admin-shell .btn-outline-warning,
+.admin-shell .btn-outline-danger {
+    color: var(--foreground);
+    border-color: var(--border-hover);
+}
+
 .media-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));

@@ -57,6 +57,10 @@ export const api = {
     request("/auth/register", { method: "POST", body: { username, email, password }, auth: false }),
   logout: () => request("/auth/logout", { method: "POST", auth: false }),
   me: () => request("/auth/me"),
+  changePassword: (current_password, new_password) =>
+    request("/auth/password", { method: "POST", body: { current_password, new_password } }),
+  changeUsername: (current_password, username) =>
+    request("/auth/username", { method: "POST", body: { current_password, username } }),
   totpBegin: () => request("/auth/totp/begin", { method: "POST" }),
   totpConfirm: (code) => request("/auth/totp/confirm", { method: "POST", body: { code } }),
   models: () => request("/images/models"),

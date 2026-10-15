@@ -7,6 +7,7 @@ import GenerateForm from "./components/GenerateForm.jsx";
 import Gallery from "./components/Gallery.jsx";
 import AdminPanel from "./components/AdminPanel.jsx";
 import AuthModals from "./components/AuthModals.jsx";
+import AccountModal from "./components/AccountModal.jsx";
 import KeysModal from "./components/KeysModal.jsx";
 import Lightbox from "./components/Lightbox.jsx";
 import ParamsModal from "./components/ParamsModal.jsx";
@@ -19,6 +20,7 @@ export default function App() {
   const [showLogin, setShowLogin] = useState(false);
   const [showRegister, setShowRegister] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
+  const [showAccount, setShowAccount] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTotp, setShowTotp] = useState(false);
   const [status, setStatus] = useState(null);
@@ -237,6 +239,7 @@ export default function App() {
         user={user}
         onLogin={() => setShowLogin(true)}
         onKeys={() => setShowKeys(true)}
+        onAccount={() => setShowAccount(true)}
         onAdmin={() => {
           if (user?.is_admin && !user.totp_enabled) setShowTotp(true);
           else setShowAdmin(true);
@@ -304,6 +307,13 @@ export default function App() {
             setShowTotp(false);
             await loadMe();
           }}
+        />
+      )}
+      {showAccount && user && (
+        <AccountModal
+          user={user}
+          onClose={() => setShowAccount(false)}
+          onUsernameChanged={(next) => setUser(next)}
         />
       )}
       {showKeys && (

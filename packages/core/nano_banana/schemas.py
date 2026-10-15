@@ -86,10 +86,50 @@ class AdminPasswordRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def validate_admin_password(cls, v: str) -> str:
-        text = (v or "").strip()
-        if len(text) < 10:
+        text = v or ""
+        if not text.strip():
             raise ValueError("Нужен ваш пароль")
+        if len(text) > 72:
+            raise ValueError("Пароль слишком длинный")
         return text
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("current_password")
+    @classmethod
+    def validate_current_password(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("Нужен текущий пароль")
+        return v
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if len(v or "") < 10:
+            raise ValueError("Новый пароль: не меньше 10 символов")
+        if len((v or "").encode("utf-8")) > 72:
+            raise ValueError("Пароль слишком длинный (максимум 72 байта)")
+        return v
+
+
+class UsernameChangeRequest(BaseModel):
+    current_password: str
+    username: str
+
+    @field_validator("current_password")
+    @classmethod
+    def validate_current_password(cls, v: str) -> str:
+        if not (v or "").strip():
+            raise ValueError("Нужен текущий пароль")
+        return v
+
+    @field_validator("username")
+    @classmethod
+    def validate_new_username(cls, v: str) -> str:
+        return normalize_username(v)
 
 
 class MosaicPromptUpdate(AdminPasswordRequest):
@@ -242,8 +282,8 @@ class ImageGenerationRequest(BaseModel):
         if v is None:
             return None
         kind = v.strip().lower()
-        if kind not in {"direct", "combo"}:
-            raise ValueError("Режим мозаики: комплект или верх и низ")
+        if kind not in {"direct", "combo", "synthetic", "synthetic_combo"}:
+            raise ValueError("Режим мозаики: примерка или синтетика")
         return kind
 
     @field_validator("reference_images")

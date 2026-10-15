@@ -4,6 +4,7 @@ export default function Navbar({
   user,
   onLogin,
   onKeys,
+  onAccount,
   onAdmin,
   onTotp,
   onLogout,
@@ -48,6 +49,11 @@ export default function Navbar({
                   {user.username}
                 </button>
                 <ul className="dropdown-menu dropdown-menu-end">
+                  <li>
+                    <button className="dropdown-item" onClick={onAccount}>
+                      Аккаунт
+                    </button>
+                  </li>
                   <li>
                     <button className="dropdown-item" onClick={onKeys}>
                       API ключи

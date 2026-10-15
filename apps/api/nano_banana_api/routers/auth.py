@@ -13,7 +13,14 @@ from nano_banana.crypto import CryptoService
 from nano_banana.db.models import User
 from nano_banana.db.session import db_service
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
-from nano_banana.schemas import TotpConfirmRequest, UserCreateRequest, UserLoginRequest, UserResponse
+from nano_banana.schemas import (
+    PasswordChangeRequest,
+    TotpConfirmRequest,
+    UsernameChangeRequest,
+    UserCreateRequest,
+    UserLoginRequest,
+    UserResponse,
+)
 from nano_banana.security import constant_time_secret_equal
 from nano_banana.tokens import Token, TokenPayload
 from nano_banana.totp_qr import otpauth_qr_data_url
@@ -186,6 +193,51 @@ async def get_current_user_info(user: Annotated[TokenPayload, Depends(auth_servi
         db_user = session.query(User).filter(User.id == user.user_id).first()
         if not db_user:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        return _user_response(db_user)
+
+
+@router.post("/password")
+async def change_password(
+    body: PasswordChangeRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    check_rate_limit(
+        "password-change",
+        str(user.user_id),
+        8,
+        3600,
+        "Слишком много смен пароля. Попробуйте позже.",
+    )
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user or not auth_service.verify_password(body.current_password, db_user.hashed_password):
+            raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
+        db_user.hashed_password = auth_service.get_password_hash(body.new_password)
+        session.commit()
+    return {"ok": True}
+
+
+@router.post("/username")
+async def change_username(
+    body: UsernameChangeRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    check_rate_limit(
+        "username-change",
+        str(user.user_id),
+        8,
+        3600,
+        "Слишком много смен имени. Попробуйте позже.",
+    )
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user or not auth_service.verify_password(body.current_password, db_user.hashed_password):
+            raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
+        taken = session.query(User).filter(User.username == body.username, User.id != db_user.id).first()
+        if taken:
+            raise HTTPException(status_code=409, detail="Это имя уже занято")
+        db_user.username = body.username
+        session.commit()
         return _user_response(db_user)
 
 

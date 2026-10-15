@@ -154,7 +154,13 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                 {mosaicPrompts.map((slot) => (
                   <div className="mb-3" key={`${slot.mode}-${slot.variant}`}>
                     <label className="form-label">
-                      {slot.mode === "combo" ? "Верх и низ" : "Комплект"} · {slot.variant}
+                      {{
+                        direct: "Комплект",
+                        combo: "Верх и низ",
+                        synthetic: "Синтетика",
+                        synthetic_combo: "Синтетика верх и низ",
+                      }[slot.mode] || slot.mode}{" "}
+                      · {slot.variant}
                       {slot.custom ? " · изменён" : ""}
                     </label>
                     <textarea
@@ -488,12 +494,11 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
               setPwValue("");
             }}
           >
-            <p className="small text-muted">Подтвердите действие своим паролем.</p>
+            <p className="small text-muted">Пароль от входа в Nano Banana, не код из приложения 2FA.</p>
             <input
               className="form-control mb-3"
               type="password"
               autoComplete="current-password"
-              minLength={10}
               value={pwValue}
               onChange={(e) => setPwValue(e.target.value)}
               autoFocus
