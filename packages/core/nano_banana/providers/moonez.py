@@ -513,7 +513,11 @@ class BananalabService:
                         body = resp.json()
                     except Exception:
                         body = resp.text
-                    msg = humanize_api_error(detail_from_response_body(body), resp.status_code)
+                    msg = humanize_api_error(
+                        detail_from_response_body(body),
+                        resp.status_code,
+                        provider="bananalab",
+                    )
                     if is_bananalab_paused_message(msg) or (
                         isinstance(body, dict)
                         and is_bananalab_paused_message(detail_from_response_body(body))

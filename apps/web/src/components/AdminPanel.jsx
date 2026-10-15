@@ -35,6 +35,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
   const [pwModal, setPwModal] = useState(null);
   const [pwValue, setPwValue] = useState("");
   const [idleOnly, setIdleOnly] = useState(false);
+  const [mosaicPrompts, setMosaicPrompts] = useState(null);
   const pageSize = 24;
 
   function askPassword(title) {
@@ -131,6 +132,64 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                 </div>
               </div>
             )}
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h6 className="mb-0">Промпты мозаики</h6>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-light"
+                onClick={async () => {
+                  try {
+                    const data = await api.adminMosaicPrompts();
+                    setMosaicPrompts(data.prompts || []);
+                  } catch (e) {
+                    toast(e.message, "error");
+                  }
+                }}
+              >
+                {mosaicPrompts ? "Обновить" : "Открыть"}
+              </button>
+            </div>
+            {mosaicPrompts && (
+              <div className="mb-4">
+                {mosaicPrompts.map((slot) => (
+                  <div className="mb-3" key={`${slot.mode}-${slot.variant}`}>
+                    <label className="form-label">
+                      {slot.mode === "combo" ? "Верх и низ" : "Комплект"} · {slot.variant}
+                      {slot.custom ? " · изменён" : ""}
+                    </label>
+                    <textarea
+                      className="form-control"
+                      rows="4"
+                      value={slot.body}
+                      onChange={(e) => {
+                        const body = e.target.value;
+                        setMosaicPrompts((prev) =>
+                          prev.map((row) =>
+                            row.mode === slot.mode && row.variant === slot.variant ? { ...row, body } : row
+                          )
+                        );
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary mt-2"
+                      onClick={() =>
+                        runUserAction("Сохранить промпт мозаики", (password) =>
+                          api.adminSaveMosaicPrompt({
+                            mode: slot.mode,
+                            variant: slot.variant,
+                            body: slot.body,
+                            password,
+                          })
+                        )
+                      }
+                    >
+                      Сохранить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
               <h6 className="mb-0">Пользователи</h6>
               <div className="form-check">
@@ -160,7 +219,8 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                   <th>ID</th>
                   <th>Username</th>
                   <th>Email</th>
-                  <th>Admin</th>
+                    <th>Admin</th>
+                    <th>Оператор</th>
                   <th>Статус</th>
                   <th>Генерации</th>
                   <th>Последняя генерация</th>
@@ -170,7 +230,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
               <tbody>
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-muted">
+                    <td colSpan={9} className="text-muted">
                       {idleOnly ? "Нет аккаунтов без генераций 2+ месяцев." : "Нет пользователей."}
                     </td>
                   </tr>
@@ -181,6 +241,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                     <td>{u.username}</td>
                     <td>{u.email}</td>
                     <td>{u.is_admin ? "да" : "нет"}</td>
+                    <td>{u.is_operator ? "да" : "нет"}</td>
                     <td>{u.is_active === false ? "выкл" : "активен"}</td>
                     <td>{u.generation_count ?? 0}</td>
                     <td>
@@ -204,6 +265,21 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                             onClick={() => runUserAction("Назначить админом", (password) => api.adminGrant(u.id, password))}
                           >
                             Админ
+                          </button>
+                        )}
+                        {u.is_operator ? (
+                          <button
+                            className="btn btn-sm btn-outline-warning"
+                            onClick={() => runUserAction("Снять оператора", (password) => api.adminRevokeOperator(u.id, password))}
+                          >
+                            Снять оператора
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={() => runUserAction("Назначить оператором", (password) => api.adminGrantOperator(u.id, password))}
+                          >
+                            Оператор
                           </button>
                         )}
                         {u.is_active === false ? (

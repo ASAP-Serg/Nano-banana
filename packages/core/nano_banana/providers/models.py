@@ -19,10 +19,6 @@ MODEL_REGISTRY: Dict[str, dict] = {
         "group": "bananalab",
         "params_profile": "nano",
         "moonez_model": "gemini-nano-banana-2.1",
-        "moonez_model_aliases": (
-            "gemini-nano-banana-2.1-preview",
-            "gemini-3.6-flash-image",
-        ),
     },
     "nano-banana-2": {
         "display_name": "gemini-3.1-flash-image",

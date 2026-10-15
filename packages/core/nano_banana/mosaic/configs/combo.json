@@ -1,0 +1,48 @@
+{
+    "name": "Gemini Direct Combo V1",
+	"title": "Gemini Direct Combo V1",
+    "reserve_id": null,
+    "hook": "",
+    "framework_version": "NB",
+    "model_id": "genapi@main",
+    "parameters": [
+    {
+      "gender": "female",
+      "gemini": {
+        "model_id": "gemini-3-pro-image-preview",
+        "location": "global",
+        "aspect_ratio": "9:16",
+        "image_size": "1K",
+        "retry_on": ["RESOURCE_EXHAUSTED"],
+        "retry_delay": 0.1,
+        "prompt:default": "Generate a photorealistic, high-end commercial fashion photograph on a pure white background. [Source Mapping] 1. IDENTITY: Use the facial features, head structure, and skin tone strictly from the provided <person> image. 2. ANATOMY & POSE: Use the exact body proportions, stance, and limb positioning from the provided <body shape> image. 3. GARMENT: The subject is wearing the provided <clothing> image. [Execution Logic] Composite the head of <person> seamlessly onto the body of <body shape>. Warp and drape the <clothing> to fit the specific volume and muscles of <body shape> naturally. Ensure realistic fabric physics—create tension folds where the body stretches and natural slack where it relaxes. [Lighting & Style] Uniform softbox studio lighting, high contrast, sharp focus, 8k resolution. No floating artifacts.",
+        "prompt:3_pro": "Create a photorealistic virtual try-on edit of the userʼs original full-body photo. Keep the same person exactly as in the original photo: same face, same identity, same hairstyle, same body shape, same pose, same arms and legs, same camera angle, same framing, same background, and same lighting. Do not create a new scene. Do not create a collage, comparison layout, reference board, split screen, labels, or any text in the image. Use the provided clothing images only as clothing references. Do not use them as face references, body references, pose references, or background references. Dress the person from the original photo in the provided garments: use the top clothing reference for the upper body and use the bottom clothing reference for the lower body. Reproduce the garments as accurately as possible: shape, fit, silhouette, length, fabric, texture, color, print, seams, cuffs, waistband, closures, and details. Footwear rule: If shoes or any footwear are visible in the lower clothing reference, transfer that footwear together with the lower garment and replace the original footwear completely. If no shoes or footwear are visible in the lower clothing reference, keep the original footwear from the user's photo unchanged. Do not invent new shoes. Do not remove the user's original shoes unless replacement footwear is visible in the lower clothing reference. If tights, pantyhose, stockings, or any visible legwear are present in the lower clothing reference, they must be transferred as required outfit elements. Reproduce hosiery accurately, including color, opacity, transparency, sheen, texture, and leg coverage. Do not treat hosiery as bare skin. Do not leave the legs bare when the lower clothing reference includes tights, pantyhose, stockings, or hosiery. Fit the garments naturally to the personʼs exact body and pose with realistic folds, draping, tension, and contact with the body. Hard constraints: no face change, no body change, no pose change, no background change, no text, no labels, no split layout, no collage, no extra people, no extra limbs, no floating clothes, no invented clothing details, no beauty retouching, no stylization. Return one single realistic edited fashion photo of the same person wearing the provided outfit.",
+        "prompt:2.5_flash": "Create a photorealistic virtual try-on edit of the user’s original full-body photo; IDENTITY PRESERVATION (STRICT): keep the exact same person as in the original image including the same face, identity, facial features, expression, hairstyle, hair color, skin tone, body shape, body proportions, arms, hands, legs, anatomy, and pose; SCENE PRESERVATION (STRICT): keep the exact same camera angle, framing, composition, background, environment, lighting, and shadows, and do not generate a new scene or alter the environment; CLOTHING REPLACEMENT: use the provided clothing images only as clothing references and dress the person from the original photo using the top reference for the upper body and the bottom reference for the lower body while completely replacing the clothing worn in the original photo; GARMENT ACCURACY: reproduce the garments as accurately as possible including silhouette, fit, proportions, length, fabric, texture, color, prints, patterns, seams, cuffs, waistband, closures, logos, and all design details; FOOTWEAR TRANSFER: if shoes are visible in the lower clothing reference they must be transferred and must fully replace the original footwear, and do not keep the original shoes or bare feet when the reference includes shoes; PHYSICAL FIT: garments must fit naturally on the exact body and pose with realistic folds, draping, tension, and body contact; HARD CONSTRAINTS: do not change the face, identity, body, pose, background, lighting, or camera perspective and do not generate text, labels, split layouts, collages, comparison boards, extra people, extra limbs, floating clothes, invented clothing details, stylization, or beauty retouching; OUTPUT: return one single photorealistic edited fashion image of the same person wearing the provided outfit.",        
+        "prompt:3.1_flash": "Create a photorealistic virtual try-on edit of the user’s original full-body photo; IDENTITY PRESERVATION (STRICT): keep the exact same person as in the original image including the same face, identity, facial features, expression, hairstyle, hair color, skin tone, body shape, body proportions, arms, hands, legs, anatomy, and pose; SCENE PRESERVATION (STRICT): keep the exact same camera angle, framing, composition, background, environment, lighting, and shadows, and do not generate a new scene or alter the environment; CLOTHING REPLACEMENT: use the provided clothing images only as clothing references and dress the person from the original photo using the top reference for the upper body and the bottom reference for the lower body while completely replacing the clothing worn in the original photo; GARMENT ACCURACY: reproduce the garments as accurately as possible including silhouette, fit, proportions, length, fabric, texture, color, prints, patterns, seams, cuffs, waistband, closures, logos, and all design details; FOOTWEAR TRANSFER: if shoes are visible in the lower clothing reference they must be transferred and must fully replace the original footwear, and do not keep the original shoes or bare feet when the reference includes shoes; PHYSICAL FIT: garments must fit naturally on the exact body and pose with realistic folds, draping, tension, and body contact; HARD CONSTRAINTS: do not change the face, identity, body, pose, background, lighting, or camera perspective and do not generate text, labels, split layouts, collages, comparison boards, extra people, extra limbs, floating clothes, invented clothing details, stylization, or beauty retouching; OUTPUT: return one single photorealistic edited fashion image of the same person wearing the provided outfit."
+      },
+      "control": [
+        {
+          "use": "user picture",
+          "type": "controlnet",
+          "fullbody_image_url": "",
+          "text": ""
+        },
+        {
+          "use": "combo first source image",
+          "type": "ipa",
+          "image_url": "",
+          "text": ""
+        },
+        {
+          "use": "combo second source image",
+          "type": "ipa",
+          "image_url": "",
+          "text": ""
+        }
+      ]
+    }
+  ],
+  "save_format": "jpg",
+  "image_quality": 95
+}
+

@@ -1,0 +1,45 @@
+{
+  	"name": "Gemini Direct V1",
+	"title": "Gemini Direct V1",
+      "model_id": "genapi@main",
+      "reserve_id": null,
+      "hook": "https://10.70.10.140:5054",
+      "framework_version": "NB",
+
+  "parameters": [
+    {
+      "gender": "female",
+      "gemini": {
+        "model_id": "gemini-3-pro-image-preview",
+        "vertexai": false,
+        "location": "global",
+        "aspect_ratio": "9:16",
+        "image_size": "1K",
+        "retry_on": ["RESOURCE_EXHAUSTED"],
+        "retry_delay": 0.1,
+        "prompt:default": "Edit IMAGE 1 so the person is wearing the exact outfit from IMAGE 2 (virtual try-on). Only change the clothing and accessories. Keep the same person identity: fa/facial features, skin tone, hairstyle, hair color, makeup, body shape, pose, and expression must remain unchanged. Keep the original background, lighting, camera angle, framing, image resolution, and overall style exactly the same as IMAGE 1. Recreate the outfit 1:1 from IMAGE 2: match fabric, colors, patterns, logos, stitching, buttons, zippers, pockets, collar/neckline, sleeve length, fit, wrinkles/drape, and all accessories exactly.Ensure realistic integration: correct shadows, highlights, folds, and occlusion (e.g., hair over clothing, hands over sleeves if applicable). Do not alter the face, hair, background, or add/remove any objects—only replace clothing.",
+        "prompt:3_pro": "High realism virtual try-on. Replace the entire outfit in IMAGE 1 with the complete outfit from IMAGE 2, including top, bottom, and shoes. Preserve the person's identity, face, hair, skin tone, body shape, pose, expression, and camera angle from IMAGE 1. Do not change pose, body proportions, body position, framing, or perspective. Remove all original clothing from IMAGE 1 and do not keep any original top, bottom, or shoes visible. Recreate the outfit from IMAGE 2 exactly with the same garment types, layering, silhouette, lengths, fabric, texture, colors, patterns, details, and footwear. The full outfit must fit naturally to the body and pose from IMAGE 1 with realistic draping, folds, tension, and gravity. Shoes are mandatory and must match the foot position from IMAGE 1.",        
+        "prompt:2.5_flash": "Use image 1 as the base and identity reference image. Perform a full outfit replacement on the person in image 1 using the clothing from image 2 as the only wardrobe reference. Completely remove and replace all garments currently worn in image 1. Dress the person in the exact outfit from image 2, including the upper garment, lower garment, and footwear. The shoes from image 2 must also be transferred and must replace the shoes in image 1. Preserve the outfit from image 2 as accurately as possible, including the exact garment categories, silhouette, fit, cut, length, layering, neckline, sleeve shape, waistline, pant shape, shoe type, materials, fabric texture, surface details, stitching, folds, seams, prints, patterns, branding, logos, and all visible design elements. Do not invent, simplify, restyle, censor, merge, or substitute any part of the outfit. Do not leave any clothing, shoes, or accessories from image 1 visible unless they are part of the body and not part of the outfit. The final result must show the person from image 1 wearing only the outfit and shoes from image 2.Strict preservation rules: keep the exact same face, identity, facial structure, eyes, nose, lips, skin tone, expression, hair, hairstyle, hair volume, hair color, hairline, and all visible personal features from image 1. Keep the exact same body proportions, pose, stance, hand placement, limb position, camera angle, framing, perspective, lighting, shadows, background, room layout, objects, wall shapes, mirror, furniture, floor, and overall environment from image 1. Do not change the composition. Do not alter the background in any way. Do not add artifacts, distortions, extra limbs, warped fingers, duplicate features, or changes to anatomy. Do not change the person’s age appearance, body shape, or identity. The clothing must fit naturally and realistically on the body from image 1 with believable draping, tension, folds, contact shadows, and fabric behavior. The output must be highly photorealistic and must look like a real photo of the same person from image 1 standing in the exact same place and pose, but fully redressed in the complete outfit and shoes from image 2.",        
+        "prompt:3.1_flash": "High realism virtual try-on. Replace the entire outfit in IMAGE 1 with the complete outfit from IMAGE 2, including top, bottom, and shoes. Preserve the person's identity, face, hair, skin tone, body shape, pose, expression, and camera angle from IMAGE 1. Do not change pose, body proportions, body position, framing, or perspective. Remove all original clothing from IMAGE 1 and do not keep any original top, bottom, or shoes visible. Recreate the outfit from IMAGE 2 exactly with the same garment types, layering, silhouette, lengths, fabric, texture, colors, patterns, details, and footwear. The full outfit must fit naturally to the body and pose from IMAGE 1 with realistic draping, folds, tension, and gravity. Shoes are mandatory and must match the foot position from IMAGE 1."
+      },
+      "control": [
+        {
+          "use": "user shape and pose",
+          "type": "controlnet",
+          "processed": true,
+          "fullbody_image_url": "https://mosaica-data-01.s3.eu-central-1.amazonaws.com/stage/img-human/w-f-3/image.jpg",
+          "text": "person"
+        },
+        {
+          "type": "ipa",
+          "use": "original dress",
+          "image_url": "https://mosaica-data-01.s3.eu-central-1.amazonaws.com/util/dev-images/YWBwrmkgCM/image.webp",
+          "processed": true,
+          "text": "clothing"
+        }
+      ]
+    }
+  ],
+  "save_format": "jpg",
+  "image_quality": 95
+}

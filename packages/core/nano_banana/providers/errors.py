@@ -511,9 +511,9 @@ def humanize_api_error(
             return "Не удалось сохранить файл в хранилище (403). Повторите генерацию."
         if provider == "bananalab":
             return (
-                "Moonez отклонил запрос (403). Чаще всего это IP whitelist: "
-                "в кабинете https://moonez.ai добавьте исходящий IP сервера "
-                "(раздел IP Whitelist), либо проверьте ключ bh_, баланс и доступ к модели."
+                "Moonez отклонил запрос (403). Ключ принят, но нет доступа к этой модели "
+                "или IP сервера не в whitelist. В кабинете moonez.ai откройте ключ bh_ "
+                "и включите модель (для 2.1 это gemini-nano-banana-2.1) и IP Whitelist."
             )
         if provider == "openrouter":
             return OPENROUTER_ACCOUNT_GUARD_MESSAGE

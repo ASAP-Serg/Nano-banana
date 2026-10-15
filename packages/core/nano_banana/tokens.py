@@ -18,5 +18,6 @@ class TokenPayload(BaseModel):
     email: str
     is_active: bool
     is_admin: bool
+    is_operator: bool = False
     totp_enabled: bool = False
 

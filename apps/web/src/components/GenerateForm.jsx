@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ASPECTS, GROUP_LABELS, PROVIDER_BADGE, fileToDataUrl, toast } from "../toast.js";
 
 const GROUP_ORDER = ["bananalab", "replicate", "openrouter"];
@@ -69,6 +69,11 @@ const GenerateForm = forwardRef(function GenerateForm({
   onNeedKeys,
 }, ref) {
   const [mode, setMode] = useState("text-to-image");
+  const [mosaicKind, setMosaicKind] = useState("direct");
+  const [mosaicRefs, setMosaicRefs] = useState([null, null, null]);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const canMosaic = Boolean(user?.is_operator || user?.is_admin);
   const [modelName, setModelName] = useState(() => localStorage.getItem("nb_model") || defaultModel || "nano-banana-pro");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
@@ -123,6 +128,20 @@ const GenerateForm = forwardRef(function GenerateForm({
       void (async () => {
         const extra = await collectImageFiles(files);
         if (!extra.length) return;
+        if (modeRef.current === "mosaic") {
+          setMosaicRefs((prev) => {
+            const next = [...prev];
+            let cursor = 0;
+            for (const file of extra) {
+              while (cursor < next.length && next[cursor]) cursor += 1;
+              if (cursor >= next.length) break;
+              next[cursor] = file;
+              cursor += 1;
+            }
+            return next;
+          });
+          return;
+        }
         setRefs((prev) => [...prev, ...extra].slice(0, MAX_REF_COUNT));
         setMode("image-to-image");
       })();
@@ -146,8 +165,19 @@ const GenerateForm = forwardRef(function GenerateForm({
         localStorage.setItem("nb_model", nextModel);
       }
       const urls = gen.reference_images || [];
-      setRefs(urls.slice(0, MAX_REF_COUNT).map((url) => ({ id: crypto.randomUUID(), dataUrl: url, name: "ref" })));
-      setMode(urls.length || gen.generation_mode === "image-to-image" ? "image-to-image" : "text-to-image");
+      if (gen.generation_mode === "mosaic" || gen.mosaic) {
+        const slots = [null, null, null];
+        urls.slice(0, 3).forEach((url, index) => {
+          slots[index] = { id: crypto.randomUUID(), dataUrl: url, name: "ref" };
+        });
+        setMosaicRefs(slots);
+        setMosaicKind(gen.mosaic_kind === "combo" ? "combo" : "direct");
+        setMode("mosaic");
+        setPrompt("");
+      } else {
+        setRefs(urls.slice(0, MAX_REF_COUNT).map((url) => ({ id: crypto.randomUUID(), dataUrl: url, name: "ref" })));
+        setMode(urls.length || gen.generation_mode === "image-to-image" ? "image-to-image" : "text-to-image");
+      }
       toast("Форма заполнена параметрами генерации");
     },
   }));
@@ -219,6 +249,29 @@ const GenerateForm = forwardRef(function GenerateForm({
       onNeedKeys?.();
       return;
     }
+    if (mode === "mosaic") {
+      const need = mosaicKind === "combo" ? 3 : 2;
+      const shots = mosaicRefs.slice(0, need);
+      if (shots.some((item) => !item?.dataUrl)) {
+        toast(mosaicKind === "combo" ? "Нужны человек, верх и низ" : "Нужны человек и комплект", "error");
+        return;
+      }
+      await onGenerate({
+        prompt: "mosaic",
+        negative_prompt: null,
+        generation_mode: "mosaic",
+        mosaic_kind: mosaicKind,
+        model_name: modelName,
+        resolution: "1K",
+        aspect_ratio: "9:16",
+        guidance_scale: Number(guidance),
+        num_inference_steps: Number(steps),
+        seed: seed === "" ? null : Number(seed),
+        rewrite_prompt: false,
+        reference_images: shots.map((item) => item.dataUrl),
+      });
+      return;
+    }
     await onGenerate({
       prompt,
       negative_prompt: negative || null,
@@ -256,6 +309,15 @@ const GenerateForm = forwardRef(function GenerateForm({
             >
               Image-to-Image
             </button>
+            {canMosaic && (
+              <button
+                type="button"
+                className={`btn ${mode === "mosaic" ? "btn-primary" : "btn-outline-primary"}`}
+                onClick={() => setMode("mosaic")}
+              >
+                Мозаика
+              </button>
+            )}
           </div>
           <div className="mb-3">
             <label className="form-label">Модель</label>
@@ -403,6 +465,62 @@ const GenerateForm = forwardRef(function GenerateForm({
               </div>
             </div>
           )}
+          {mode === "mosaic" && (
+            <div className="mb-3">
+              <div className="btn-group mb-2">
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mosaicKind === "direct" ? "btn-primary" : "btn-outline-primary"}`}
+                  onClick={() => setMosaicKind("direct")}
+                >
+                  Комплект
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${mosaicKind === "combo" ? "btn-primary" : "btn-outline-primary"}`}
+                  onClick={() => setMosaicKind("combo")}
+                >
+                  Верх и низ
+                </button>
+              </div>
+              <p className="small text-muted">Порядок фото фиксирован. Кадр 9:16, размер 1K. Промпт подставляет сервер.</p>
+              <div className="d-flex flex-wrap gap-3">
+                {(mosaicKind === "combo" ? ["Человек", "Верх", "Низ"] : ["Человек", "Комплект"]).map((label, index) => (
+                  <div key={label}>
+                    <div className="form-label">{label}</div>
+                    {mosaicRefs[index] ? (
+                      <div className="reference-item">
+                        <img src={mosaicRefs[index].dataUrl} alt={label} />
+                        <span className="reference-label">{label}</span>
+                        <button
+                          type="button"
+                          className="reference-remove"
+                          onClick={() =>
+                            setMosaicRefs((prev) => prev.map((item, i) => (i === index ? null : item)))
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ) : (
+                      <input
+                        className="form-control form-control-sm"
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={async (e) => {
+                          const extra = await collectImageFiles(e.target.files);
+                          e.target.value = "";
+                          if (!extra[0]) return;
+                          setMosaicRefs((prev) => prev.map((item, i) => (i === index ? extra[0] : item)));
+                        }}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {mode !== "mosaic" && (
           <div className="mb-3">
             <label className="form-label">Описание</label>
             <textarea
@@ -414,6 +532,8 @@ const GenerateForm = forwardRef(function GenerateForm({
               onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT_LENGTH))}
             />
           </div>
+          )}
+          {mode !== "mosaic" && (
           <div className="form-check mb-3">
             <input
               className="form-check-input"
@@ -439,6 +559,8 @@ const GenerateForm = forwardRef(function GenerateForm({
               onChange={(e) => setNegative(e.target.value.slice(0, MAX_NEGATIVE_LENGTH))}
             />
           </div>
+          )}
+          {mode !== "mosaic" && (
           <div className="row mb-3">
             <div className="col-6">
               <label className="form-label">Разрешение</label>
@@ -487,7 +609,8 @@ const GenerateForm = forwardRef(function GenerateForm({
               </div>
             </div>
           </div>
-          {showStepsGuidance && (
+          )}
+          {showStepsGuidance && mode !== "mosaic" && (
             <div className="row mb-3">
               <div className="col-6">
                 <label className="form-label">Шаги</label>

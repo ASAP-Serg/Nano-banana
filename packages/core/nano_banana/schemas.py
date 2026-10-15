@@ -12,7 +12,7 @@ MAX_REFERENCE_IMAGES = 4
 MAX_MODEL_NAME_LENGTH = 64
 ALLOWED_RESOLUTIONS = frozenset({"1K", "2K", "4K"})
 ALLOWED_ASPECT_RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "5:4", "2:3"})
-ALLOWED_GENERATION_MODES = frozenset({"text-to-image", "image-to-image"})
+ALLOWED_GENERATION_MODES = frozenset({"text-to-image", "image-to-image", "mosaic"})
 
 _USERNAME_RE = re.compile(r"^[\w.-]{3,32}$", re.UNICODE)
 
@@ -73,6 +73,7 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     is_admin: bool
+    is_operator: bool = False
     totp_enabled: bool = False
     created_at: datetime
     
@@ -88,6 +89,22 @@ class AdminPasswordRequest(BaseModel):
         text = (v or "").strip()
         if len(text) < 10:
             raise ValueError("Нужен ваш пароль")
+        return text
+
+
+class MosaicPromptUpdate(AdminPasswordRequest):
+    mode: str
+    variant: str
+    body: str
+
+    @field_validator("body")
+    @classmethod
+    def validate_mosaic_body(cls, v: str) -> str:
+        text = (v or "").strip()
+        if len(text) < 20:
+            raise ValueError("Промпт слишком короткий")
+        if len(text) > 20000:
+            raise ValueError("Промпт слишком длинный")
         return text
 
 
@@ -138,6 +155,7 @@ class ImageGenerationRequest(BaseModel):
     reference_images: Optional[List[str]] = None
     model_name: Optional[str] = None
     rewrite_prompt: Optional[bool] = False
+    mosaic_kind: Optional[str] = None  # direct | combo, только для generation_mode=mosaic
 
     @field_validator("prompt")
     @classmethod
@@ -218,6 +236,16 @@ class ImageGenerationRequest(BaseModel):
             raise ValueError("Неизвестная модель")
         return key
 
+    @field_validator("mosaic_kind")
+    @classmethod
+    def validate_mosaic_kind(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        kind = v.strip().lower()
+        if kind not in {"direct", "combo"}:
+            raise ValueError("Режим мозаики: комплект или верх и низ")
+        return kind
+
     @field_validator("reference_images")
     @classmethod
     def validate_references(cls, v: Optional[List[str]]) -> Optional[List[str]]:
@@ -261,6 +289,8 @@ class ImageResponse(BaseModel):
     provider_model: Optional[str] = None
     provider_cost_usd: Optional[float] = None
     estimated_cost_usd: Optional[float] = None
+    mosaic: bool = False
+    mosaic_kind: Optional[str] = None
     
     class Config:
         from_attributes = True

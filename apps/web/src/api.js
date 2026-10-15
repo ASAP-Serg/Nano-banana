@@ -91,6 +91,12 @@ export const api = {
     request(`/admin/users/${id}/grant-admin`, { method: "POST", body: { password } }),
   adminRevoke: (id, password) =>
     request(`/admin/users/${id}/revoke-admin`, { method: "POST", body: { password } }),
+  adminGrantOperator: (id, password) =>
+    request(`/admin/users/${id}/grant-operator`, { method: "POST", body: { password } }),
+  adminRevokeOperator: (id, password) =>
+    request(`/admin/users/${id}/revoke-operator`, { method: "POST", body: { password } }),
+  adminMosaicPrompts: () => request("/admin/mosaic-prompts"),
+  adminSaveMosaicPrompt: (body) => request("/admin/mosaic-prompts", { method: "PUT", body }),
   adminDeactivate: (id, password) =>
     request(`/admin/users/${id}/deactivate`, { method: "POST", body: { password } }),
   adminActivate: (id, password) =>

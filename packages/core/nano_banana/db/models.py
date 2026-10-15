@@ -17,6 +17,7 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)  # Переименовано из is_superuser
+    is_operator = Column(Boolean, default=False)  # Примерка мозаики, обычная генерация остаётся
     replicate_api_key = Column(String, nullable=True)  # API ключ пользователя (зашифрован)
     totp_secret = Column(String, nullable=True)  # зашифрованный секрет TOTP
     totp_enabled = Column(Boolean, default=False)
@@ -54,6 +55,17 @@ class Generation(Base):
 
     # Связь многие к 1 (Generation → User)
     user = relationship("User", back_populates="generations")
+
+
+class MosaicPrompt(Base):
+    """Текст промпта мозаики, если админ заменил конфиг. Пусто в таблице — берётся файл."""
+
+    __tablename__ = "mosaic_prompts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mode = Column(String, nullable=False)  # direct | combo
+    variant = Column(String, nullable=False)  # default | 3_pro | 2.5_flash | 3.1_flash
+    body = Column(Text, nullable=False)
 
 
 class AdminAuditLog(Base):

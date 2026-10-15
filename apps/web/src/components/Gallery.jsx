@@ -56,6 +56,11 @@ export default function Gallery({
                   )}
                 </div>
                 <div className="card-body">
+                  {item.mosaic && (
+                    <div className="mosaic-mark" title="Мозаика">
+                      <img src="/icons/mosaica.svg" alt="" />
+                    </div>
+                  )}
                   <p className="small mb-1 prompt-text">{item.prompt}</p>
                   <div className="small text-muted">
                     #{item.id} · {item.model_name} · {statusLabel(item)}

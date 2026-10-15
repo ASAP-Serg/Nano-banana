@@ -10,13 +10,14 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from nano_banana.auth import auth_service
 from nano_banana.config import settings
-from nano_banana.db.models import Generation, User
+from nano_banana.db.models import Generation, MosaicPrompt, User
 from nano_banana.db.session import db_service
 from nano_banana.generation.cleanup import cleanup_old_generations
 from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
 from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.generation.processor import MAX_GENERATION_RETRIES, get_fallback_model, rewrite_metadata_fields
 from nano_banana.generation.references import store_reference_images
+from nano_banana.mosaic.prompts import resolve_mosaic_prompt
 from nano_banana.providers.models import DEFAULT_MODEL_ID, MODEL_REGISTRY, get_model_entry, get_provider_for_model, models_available_with_keys
 from nano_banana.queue.jobs import get_job_queue
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
@@ -29,6 +30,24 @@ from nano_banana.tokens import TokenPayload
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/images", tags=["images"])
 _minio: Optional[MinioService] = None
+
+
+def _mosaic_label(kind: Optional[str]) -> str:
+    return "Мозаика · верх и низ" if kind == "combo" else "Мозаика · комплект"
+
+
+def _hide_mosaic_prompt(data: dict, metadata: dict, user: TokenPayload) -> dict:
+    if not metadata.get("mosaic"):
+        return data
+    data["mosaic"] = True
+    data["mosaic_kind"] = metadata.get("mosaic_kind")
+    if user.is_admin:
+        return data
+    data["prompt"] = _mosaic_label(metadata.get("mosaic_kind"))
+    data["negative_prompt"] = None
+    for key in ("original_prompt", "sanitized_prompt", "rewritten_prompt", "sanitize_replacements"):
+        data[key] = None
+    return data
 
 
 def _storage() -> MinioService:
@@ -87,6 +106,42 @@ async def generate_image(
             )
         select_key_for_model(user.user_id, selected_model)
 
+        if body.generation_mode == "mosaic":
+            if not user.is_operator and not user.is_admin:
+                raise HTTPException(status_code=403, detail="Режим мозаики только для операторов")
+            if body.mosaic_kind not in {"direct", "combo"}:
+                raise HTTPException(status_code=400, detail="Выберите комплект или верх и низ")
+            expected = 3 if body.mosaic_kind == "combo" else 2
+            refs = body.reference_images or []
+            if len(refs) != expected:
+                detail = (
+                    "Нужны фото человека, верха и низа"
+                    if body.mosaic_kind == "combo"
+                    else "Нужны фото человека и комплекта"
+                )
+                raise HTTPException(status_code=400, detail=detail)
+            with db_service.get_session() as session:
+                overrides = {
+                    row.variant: row.body
+                    for row in session.query(MosaicPrompt).filter(MosaicPrompt.mode == body.mosaic_kind).all()
+                    if row.body and str(row.body).strip()
+                }
+            prompt_text, variant = resolve_mosaic_prompt(body.mosaic_kind, selected_model, overrides)
+            body = body.model_copy(
+                update={
+                    "negative_prompt": None,
+                    "resolution": "1K",
+                    "aspect_ratio": "9:16",
+                    "rewrite_prompt": False,
+                    "reference_images": refs,
+                }
+            )
+            job_prompt = prompt_text
+            mosaic_meta = {"mosaic": True, "mosaic_kind": body.mosaic_kind, "mosaic_variant": variant}
+        else:
+            job_prompt = body.prompt
+            mosaic_meta = {}
+
         with db_service.get_session() as session:
             active_count = (
                 session.query(Generation)
@@ -113,10 +168,11 @@ async def generate_image(
                 "provider": model_provider,
                 "retry_count": 0,
                 "max_retries": MAX_GENERATION_RETRIES,
+                **mosaic_meta,
             }
             generation = Generation(
                 user_id=user.user_id,
-                prompt=body.prompt,
+                prompt=job_prompt,
                 negative_prompt=body.negative_prompt,
                 generation_mode=body.generation_mode,
                 model_name=selected_model,
@@ -150,7 +206,9 @@ async def generate_image(
                 flag_modified(generation, "generation_metadata")
                 session.commit()
 
-        get_job_queue().enqueue(generation_id, user.user_id, _queue_payload(body, reference_image_urls))
+        queued = _queue_payload(body, reference_image_urls)
+        queued["prompt"] = job_prompt
+        get_job_queue().enqueue(generation_id, user.user_id, queued)
         return ImageGenerationResponse(
             status="pending",
             image_id=generation_id,
@@ -227,7 +285,7 @@ async def list_generations(
             data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
             if data.get("created_at"):
                 data["created_at"] = data["created_at"].isoformat()
-            result.append(data)
+            result.append(_hide_mosaic_prompt(data, meta, user))
         return JSONResponse(
             content={
                 "generations": result,
@@ -385,7 +443,7 @@ async def get_generation_full(
             raise HTTPException(status_code=404, detail="Генерация не найдена")
         metadata = generation.generation_metadata or {}
         model_name = generation.model_name or metadata.get("model_name", "nano-banana-pro")
-        return {
+        payload = {
             "id": generation.id,
             "prompt": generation.prompt,
             "negative_prompt": generation.negative_prompt,
@@ -407,6 +465,7 @@ async def get_generation_full(
             ),
             **rewrite_metadata_fields(metadata),
         }
+        return _hide_mosaic_prompt(payload, metadata, user)
 
 
 @router.delete("/{generation_id}")

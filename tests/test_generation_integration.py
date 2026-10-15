@@ -557,10 +557,9 @@ class TestProviderTraceAndCost(unittest.TestCase):
         self.assertEqual(moonez_upstream_model("nano-banana-2.1"), "gemini-nano-banana-2.1")
         self.assertEqual(moonez_upstream_model("nano-banana-pro"), "gemini-3-pro-image")
         self.assertEqual(
-            moonez_model_candidates("nano-banana-2.1")[0],
-            "gemini-nano-banana-2.1",
+            moonez_model_candidates("nano-banana-2.1"),
+            ["gemini-nano-banana-2.1"],
         )
-        self.assertIn("gemini-nano-banana-2.1-preview", moonez_model_candidates("nano-banana-2.1"))
         self.assertTrue(is_unknown_moonez_model_error("Unknown model", 422))
         self.assertFalse(is_unknown_moonez_model_error("rate limit", 429))
 

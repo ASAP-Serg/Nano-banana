@@ -8,13 +8,14 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, or_, func
 
-from nano_banana.db.models import Generation, User, AdminAuditLog
+from nano_banana.db.models import Generation, User, AdminAuditLog, MosaicPrompt
 from nano_banana.tokens import TokenPayload
 from nano_banana.auth import auth_service
 from nano_banana.db.session import db_service
 from nano_banana.config import settings
 from nano_banana.rate_limit import check_rate_limit
-from nano_banana.schemas import AdminPasswordRequest
+from nano_banana.mosaic.prompts import MODES, VARIANTS, bundled_prompts, list_prompt_slots
+from nano_banana.schemas import AdminPasswordRequest, MosaicPromptUpdate
 from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.idle import IDLE_GENERATION_DAYS, is_generation_idle
 from nano_banana.storage.media import client_reference_urls, client_result_url
@@ -177,6 +178,7 @@ async def admin_list_users(
                     "username": u.username,
                     "email": u.email,
                     "is_admin": bool(u.is_admin),
+                    "is_operator": bool(getattr(u, "is_operator", False)),
                     "is_active": bool(u.is_active),
                     "totp_enabled": bool(getattr(u, "totp_enabled", False)),
                     "created_at": u.created_at.isoformat() if u.created_at else None,
@@ -243,6 +245,122 @@ async def admin_grant_role(
         )
         session.commit()
         return {"message": f"Пользователь {target.username} назначен админом"}
+
+
+@router.post("/users/{target_user_id}/grant-operator")
+async def admin_grant_operator(
+    target_user_id: int,
+    body: AdminPasswordRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    with db_service.get_session() as session:
+        target = session.query(User).filter(User.id == target_user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        target.is_operator = True
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="grant_operator",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
+        session.commit()
+        return {"message": f"{target.username} теперь оператор мозаики"}
+
+
+@router.post("/users/{target_user_id}/revoke-operator")
+async def admin_revoke_operator(
+    target_user_id: int,
+    body: AdminPasswordRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    with db_service.get_session() as session:
+        target = session.query(User).filter(User.id == target_user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        target.is_operator = False
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="revoke_operator",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
+        session.commit()
+        return {"message": f"У {target.username} снята роль оператора"}
+
+
+def _mosaic_prompt_rows(session) -> list:
+    saved = {
+        (row.mode, row.variant): row.body
+        for row in session.query(MosaicPrompt).all()
+    }
+    slots = []
+    for slot in list_prompt_slots():
+        key = (slot["mode"], slot["variant"])
+        custom = key in saved and bool(str(saved[key] or "").strip())
+        slots.append(
+            {
+                "mode": slot["mode"],
+                "variant": slot["variant"],
+                "body": saved[key] if custom else slot["body"],
+                "custom": custom,
+            }
+        )
+    return slots
+
+
+@router.get("/mosaic-prompts")
+async def admin_mosaic_prompts(
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_read(user.user_id, "mosaic-prompts")
+    with db_service.get_session() as session:
+        return {"prompts": _mosaic_prompt_rows(session)}
+
+
+@router.put("/mosaic-prompts")
+async def admin_save_mosaic_prompt(
+    body: MosaicPromptUpdate,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    mode = body.mode.strip().lower()
+    variant = body.variant.strip()
+    if mode not in MODES or variant not in VARIANTS:
+        raise HTTPException(status_code=400, detail="Неизвестный слот промпта")
+    if variant not in bundled_prompts(mode) and variant != "prompt":
+        raise HTTPException(status_code=400, detail="В этом режиме нет такого варианта промпта")
+    with db_service.get_session() as session:
+        row = (
+            session.query(MosaicPrompt)
+            .filter(MosaicPrompt.mode == mode, MosaicPrompt.variant == variant)
+            .first()
+        )
+        if row is None:
+            row = MosaicPrompt(mode=mode, variant=variant, body=body.body)
+            session.add(row)
+        else:
+            row.body = body.body
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="update_mosaic_prompt",
+            target_user_id=None,
+            details={"mode": mode, "variant": variant},
+        )
+        session.commit()
+        return {"ok": True}
 
 
 @router.post("/users/{target_user_id}/revoke-admin")

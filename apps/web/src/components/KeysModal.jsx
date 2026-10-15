@@ -7,14 +7,19 @@ export default function KeysModal({ keys, onClose, onSaved }) {
     e.preventDefault();
     const form = new FormData(e.target);
     try {
-      const banana = (form.get("banana") || "").trim();
-      const replicate = (form.get("replicate") || "").trim();
-      const openrouter = (form.get("openrouter") || "").trim();
+      const banana = String(form.get("banana") || "").trim();
+      const replicate = String(form.get("replicate") || "").trim();
+      const openrouter = String(form.get("openrouter") || "").trim();
+      if (!banana && !replicate && !openrouter) {
+        toast("Вставьте ключ в поле. Пустое поле старый ключ не меняет.", "error");
+        return;
+      }
       if (banana) await api.setKey(banana, "bananalab");
       if (replicate) await api.setKey(replicate, "replicate");
       if (openrouter) await api.setKey(openrouter, "openrouter");
       onSaved(await api.getKeys());
-      toast("Ключи сохранены");
+      e.target.reset();
+      toast("Ключ сохранён. Строка «Сейчас» выше должна показать «есть».");
     } catch (err) {
       toast(err.message, "error");
     }

@@ -25,7 +25,7 @@ export function toast(message, type = "success") {
   el.className = `alert alert-${type === "error" ? "danger" : type} position-fixed bottom-0 end-0 m-3`;
   el.textContent = message;
   el.style.display = "block";
-  el.style.zIndex = "1080";
+  el.style.zIndex = "4000";
   window.clearTimeout(el._hide);
   el._hide = window.setTimeout(() => {
     el.style.display = "none";
