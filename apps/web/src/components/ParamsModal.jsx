@@ -6,9 +6,11 @@ export default function ParamsModal({ item, onClose }) {
   return (
     <div className="generation-params-modal" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}>
-        <div className="d-flex justify-content-between align-items-start mb-3">
+        <div className="generation-params-modal__head">
           <h5 className="mb-0">Параметры генерации</h5>
-          <button type="button" className="btn-close" onClick={onClose} />
+          <button type="button" className="generation-params-modal__close" aria-label="Закрыть" onClick={onClose}>
+            ×
+          </button>
         </div>
         <p>
           <strong>Модель:</strong> {item.model_name}

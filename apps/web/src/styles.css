@@ -930,28 +930,65 @@ h1, h2, h3, h4, h5, .h5, .navbar-brand {
     background: rgba(229, 62, 62, 0.15) !important;
 }
 
-/* Стили для кастомного модального окна параметров генерации */
 .generation-params-modal {
-    position: fixed !important;
-    top: 50% !important;
-    left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-    background: rgba(26, 26, 46, 0.98) !important;
-    border: 2px solid var(--border-color) !important;
-    border-radius: 12px !important;
-    padding: 1.5rem !important;
-    z-index: 10000 !important;
-    max-width: 600px !important;
-    width: 90% !important;
-    max-height: 90vh !important;
-    overflow-y: auto !important;
-    backdrop-filter: blur(10px) !important;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5) !important;
+    position: fixed;
+    inset: 0;
+    z-index: 12000;
+    background: rgba(0, 0, 0, 0.62);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.generation-params-modal > div {
+    background: var(--card);
+    color: var(--card-foreground);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: min(600px, 100%);
+    max-height: min(90vh, 100%);
+    overflow: auto;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.generation-params-modal__head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 1rem 0.75rem;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+}
+
+.generation-params-modal > div > :not(.generation-params-modal__head) {
+    margin-left: 1rem;
+    margin-right: 1rem;
+}
+
+.generation-params-modal > div > :last-child {
+    margin-bottom: 1rem;
+}
+
+.generation-params-modal__close {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 10px;
+    background: var(--secondary);
+    color: var(--foreground);
+    font-size: 1.5rem;
+    line-height: 1;
+    flex: 0 0 auto;
 }
 
 [data-bs-theme="light"] .generation-params-modal {
-    background: var(--bg-primary) !important;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2) !important;
+    background: rgba(0, 0, 0, 0.45) !important;
+    box-shadow: none !important;
 }
 
 /* Исправление текста в кастомном модальном окне */
@@ -1450,11 +1487,9 @@ button.info-btn:hover,
     color: var(--card-foreground);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 1.5rem;
-    max-width: 600px;
-    width: 90%;
-    max-height: 90vh;
-    overflow-y: auto;
+    width: min(600px, 100%);
+    max-height: min(90vh, 100%);
+    overflow: auto;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
 }
 
