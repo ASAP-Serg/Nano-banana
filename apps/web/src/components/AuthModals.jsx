@@ -13,7 +13,7 @@ function GoogleIcon() {
   );
 }
 
-function PasswordField({ name, placeholder, minLength, autoComplete }) {
+function PasswordField({ name, placeholder, minLength, autoComplete, value, onChange }) {
   const [visible, setVisible] = useState(false);
   return (
     <div className="nb-auth-password">
@@ -25,6 +25,7 @@ function PasswordField({ name, placeholder, minLength, autoComplete }) {
         required
         minLength={minLength}
         autoComplete={autoComplete}
+        {...(value !== undefined ? { value, onChange } : {})}
       />
       <button type="button" className="nb-auth-eye" onClick={() => setVisible((v) => !v)} tabIndex={-1}>
         {visible ? "Скрыть" : "Показать"}
@@ -42,31 +43,55 @@ function GoogleButton({ label }) {
   );
 }
 
+/** mode: signin | signup | forgot | reset | verify_sent | complete_profile | totp */
 export default function AuthModals({
   showLogin,
   showRegister,
   showTotpComplete,
+  showCompleteProfile,
+  showForgot,
+  showReset,
+  resetToken,
   onCloseLogin,
   onCloseRegister,
   onCloseTotpComplete,
+  onCloseCompleteProfile,
+  onCloseForgot,
+  onCloseReset,
   onOpenRegister,
   onOpenLogin,
+  onOpenForgot,
   onLogin,
   onRegister,
   onTotpComplete,
+  onForgot,
+  onReset,
+  onCompleteProfile,
+  onResendVerify,
   googleEnabled,
   passwordRegister = false,
+  mailEnabled = false,
   trustedDeviceDays = 30,
+  profileDraft,
 }) {
   const [remember, setRemember] = useState(true);
   const [emailMode, setEmailMode] = useState(false);
-  const open = showLogin || showRegister;
+  const [profileName, setProfileName] = useState("");
+  const [resetPassword, setResetPassword] = useState("");
+
+  const openAuth = showLogin || showRegister;
   const isRegister = showRegister;
 
   useEffect(() => {
     if (showLogin || showTotpComplete) setRemember(true);
     if (showLogin || showRegister) setEmailMode(false);
   }, [showLogin, showRegister, showTotpComplete]);
+
+  useEffect(() => {
+    if (showCompleteProfile && profileDraft?.suggested_username) {
+      setProfileName(profileDraft.suggested_username);
+    }
+  }, [showCompleteProfile, profileDraft]);
 
   function closeAuth() {
     if (isRegister) onCloseRegister();
@@ -75,20 +100,18 @@ export default function AuthModals({
 
   return (
     <>
-      {open && (
+      {openAuth && (
         <Modal title="" onClose={closeAuth}>
           <div className="nb-auth">
             <div className="nb-auth-brand">Nano Banana</div>
             <h2 className="nb-auth-title">{isRegister ? "Создать аккаунт" : "С возвращением"}</h2>
             <p className="nb-auth-sub">
               {isRegister
-                ? "Один клик через Google — аккаунт создаётся автоматически."
-                : "Войдите через Google или email. Новый пользователь Google тоже регистрируется здесь."}
+                ? "Google или email + пароль. После регистрации на email придёт ссылка подтверждения."
+                : "Войдите через Google или email. Новый Google-аккаунт создаётся автоматически."}
             </p>
 
-            {googleEnabled && (
-              <GoogleButton label={isRegister ? "Продолжить с Google" : "Продолжить с Google"} />
-            )}
+            {googleEnabled && <GoogleButton label="Продолжить с Google" />}
 
             {googleEnabled && (
               <div className="nb-auth-divider">
@@ -109,13 +132,11 @@ export default function AuthModals({
                     onRegister(e);
                   }}
                 >
-                  <label className="nb-auth-label">Email</label>
-                  <input className="nb-auth-input" name="email" type="email" placeholder="you@email.com" required autoComplete="email" />
-                  <label className="nb-auth-label">Имя в сервисе</label>
+                  <label className="nb-auth-label">Имя</label>
                   <input
                     className="nb-auth-input"
                     name="username"
-                    placeholder="3–32 символа"
+                    placeholder="Как к вам обращаться"
                     required
                     minLength={3}
                     maxLength={32}
@@ -123,15 +144,20 @@ export default function AuthModals({
                     autoCapitalize="none"
                     spellCheck={false}
                   />
+                  <label className="nb-auth-label">Email</label>
+                  <input className="nb-auth-input" name="email" type="email" placeholder="you@yandex.ru" required autoComplete="email" />
                   <label className="nb-auth-label">Пароль</label>
                   <PasswordField name="password" placeholder="От 10 символов" minLength={10} autoComplete="new-password" />
                   <button type="submit" className="nb-auth-primary">
                     Создать аккаунт
                   </button>
+                  {mailEnabled && (
+                    <p className="nb-auth-note">На почту придёт письмо со ссылкой — без подтверждения вход недоступен.</p>
+                  )}
                 </form>
               ) : (
                 <div className="nb-auth-note">
-                  Регистрация только через Google. Нажмите кнопку выше — если аккаунта ещё нет, он создастся сам.
+                  Регистрация по email временно недоступна. Используйте Google или попросите доступ у администратора.
                 </div>
               )
             ) : (
@@ -143,33 +169,33 @@ export default function AuthModals({
                   onLogin(form, remember);
                 }}
               >
-                <label className="nb-auth-label">Email</label>
+                <label className="nb-auth-label">Email или имя</label>
                 <input
                   className="nb-auth-input"
                   name="username"
-                  type="email"
+                  type="text"
                   placeholder="you@email.com"
                   required
-                  autoComplete="email"
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  spellCheck={false}
                 />
                 <label className="nb-auth-label">Пароль</label>
                 <PasswordField name="password" placeholder="Пароль" autoComplete="current-password" />
                 <label className="nb-auth-label">Код 2FA (если включён)</label>
-                <input
-                  className="nb-auth-input"
-                  name="totp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={6}
-                  placeholder="6 цифр — можно пусто"
-                />
+                <input className="nb-auth-input" name="totp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6 цифр — можно пусто" />
                 <label className="nb-auth-check">
                   <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                  Запомнить устройство {trustedDeviceDays} дн. (не спрашивать 2FA)
+                  Запомнить устройство {trustedDeviceDays} дн.
                 </label>
                 <button type="submit" className="nb-auth-primary">
                   Войти
                 </button>
+                {mailEnabled && (
+                  <button type="button" className="nb-auth-link nb-auth-forgot" onClick={onOpenForgot}>
+                    Забыли пароль?
+                  </button>
+                )}
               </form>
             )}
 
@@ -194,10 +220,97 @@ export default function AuthModals({
         </Modal>
       )}
 
+      {showForgot && (
+        <Modal title="Восстановление пароля" onClose={onCloseForgot}>
+          <div className="nb-auth">
+            <p className="nb-auth-sub">Укажите email — пришлём ссылку для нового пароля.</p>
+            <form
+              className="nb-auth-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const form = new FormData(e.target);
+                onForgot(String(form.get("email") || ""));
+              }}
+            >
+              <label className="nb-auth-label">Email</label>
+              <input className="nb-auth-input" name="email" type="email" required autoComplete="email" />
+              <button type="submit" className="nb-auth-primary">
+                Отправить ссылку
+              </button>
+            </form>
+            <p className="nb-auth-switch">
+              <button type="button" className="nb-auth-link" onClick={onOpenLogin}>
+                Назад ко входу
+              </button>
+            </p>
+          </div>
+        </Modal>
+      )}
+
+      {showReset && (
+        <Modal title="Новый пароль" onClose={onCloseReset}>
+          <div className="nb-auth">
+            <p className="nb-auth-sub">Придумайте новый пароль (от 10 символов).</p>
+            <form
+              className="nb-auth-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                onReset(resetToken, resetPassword);
+              }}
+            >
+              <label className="nb-auth-label">Новый пароль</label>
+              <PasswordField
+                name="password"
+                placeholder="От 10 символов"
+                minLength={10}
+                autoComplete="new-password"
+                value={resetPassword}
+                onChange={(e) => setResetPassword(e.target.value)}
+              />
+              <button type="submit" className="nb-auth-primary" disabled={!resetToken}>
+                Сохранить и войти
+              </button>
+            </form>
+          </div>
+        </Modal>
+      )}
+
+      {showCompleteProfile && (
+        <Modal title="Завершите регистрацию" onClose={onCloseCompleteProfile}>
+          <div className="nb-auth">
+            <p className="nb-auth-sub">Google подтвердил почту. Проверьте имя — его увидят в сервисе.</p>
+            <form
+              className="nb-auth-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                onCompleteProfile(profileName.trim());
+              }}
+            >
+              <label className="nb-auth-label">Email</label>
+              <input className="nb-auth-input" value={profileDraft?.email || ""} disabled readOnly />
+              <label className="nb-auth-label">Имя</label>
+              <input
+                className="nb-auth-input"
+                value={profileName}
+                onChange={(e) => setProfileName(e.target.value)}
+                required
+                minLength={3}
+                maxLength={32}
+                autoComplete="username"
+                autoFocus
+              />
+              <button type="submit" className="nb-auth-primary">
+                Продолжить
+              </button>
+            </form>
+          </div>
+        </Modal>
+      )}
+
       {showTotpComplete && (
         <Modal title="Подтвердите вход" onClose={onCloseTotpComplete}>
           <div className="nb-auth">
-            <p className="nb-auth-sub">Google подтверждён. Введите код из приложения-аутентификатора.</p>
+            <p className="nb-auth-sub">Введите код из приложения-аутентификатора.</p>
             <form
               className="nb-auth-form"
               onSubmit={(e) => {
@@ -206,19 +319,10 @@ export default function AuthModals({
                 onTotpComplete(form.get("code"), remember);
               }}
             >
-              <input
-                className="nb-auth-input"
-                name="code"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
-                placeholder="6 цифр"
-                required
-                autoFocus
-              />
+              <input className="nb-auth-input" name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6 цифр" required autoFocus />
               <label className="nb-auth-check">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                Запомнить это устройство на {trustedDeviceDays} дн.
+                Запомнить устройство на {trustedDeviceDays} дн.
               </label>
               <button type="submit" className="nb-auth-primary">
                 Продолжить

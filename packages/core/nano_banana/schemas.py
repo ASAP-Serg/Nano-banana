@@ -92,10 +92,50 @@ class UserResponse(BaseModel):
     totp_enabled: bool = False
     has_password: bool = True
     google_linked: bool = False
+    email_verified: bool = False
     created_at: datetime
     
     class Config:
         from_attributes = True
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("token")
+    @classmethod
+    def validate_reset_token(cls, v: str) -> str:
+        text = (v or "").strip()
+        if len(text) < 20:
+            raise ValueError("Некорректный токен")
+        return text
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_reset_password(cls, v: str) -> str:
+        if len(v or "") < 10:
+            raise ValueError("Новый пароль: не меньше 10 символов")
+        if len((v or "").encode("utf-8")) > 72:
+            raise ValueError("Пароль слишком длинный (максимум 72 байта)")
+        return v
+
+
+class ResendVerifyRequest(BaseModel):
+    email: EmailStr
+
+
+class CompleteProfileRequest(BaseModel):
+    username: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_profile_username(cls, v: str) -> str:
+        return normalize_username(v)
 
 class AdminPasswordRequest(BaseModel):
     password: str

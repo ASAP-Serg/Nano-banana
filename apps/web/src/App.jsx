@@ -24,8 +24,14 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTotp, setShowTotp] = useState(false);
   const [showTotpComplete, setShowTotpComplete] = useState(false);
+  const [showCompleteProfile, setShowCompleteProfile] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [profileDraft, setProfileDraft] = useState(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [passwordRegister, setPasswordRegister] = useState(false);
+  const [mailEnabled, setMailEnabled] = useState(false);
   const [trustedDeviceDays, setTrustedDeviceDays] = useState(30);
   const [status, setStatus] = useState(null);
   const [models, setModels] = useState({});
@@ -53,11 +59,13 @@ export default function App() {
       .then((p) => {
         setGoogleEnabled(Boolean(p?.google));
         setPasswordRegister(Boolean(p?.password_register));
+        setMailEnabled(Boolean(p?.mail));
         if (p?.trusted_device_days) setTrustedDeviceDays(Number(p.trusted_device_days) || 30);
       })
       .catch(() => {
         setGoogleEnabled(false);
         setPasswordRegister(false);
+        setMailEnabled(false);
       });
   }, []);
 
@@ -81,15 +89,36 @@ export default function App() {
       url.searchParams.delete("reason");
       window.history.replaceState({}, "", url.pathname + url.search + url.hash);
     };
-    if (auth === "ok") {
-      clean();
-      loadMe().then(() => toast("Вход выполнен"));
+    const cleanAll = () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      url.searchParams.delete("reason");
+      url.searchParams.delete("token");
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    };
+    if (auth === "ok" || auth === "verified") {
+      cleanAll();
+      loadMe().then(() => toast(auth === "verified" ? "Email подтверждён" : "Вход выполнен"));
     } else if (auth === "totp_required") {
-      clean();
+      cleanAll();
       setShowTotpComplete(true);
+    } else if (auth === "complete_profile") {
+      cleanAll();
+      api
+        .profilePending()
+        .then((draft) => {
+          setProfileDraft(draft);
+          setShowCompleteProfile(true);
+        })
+        .catch(() => toast("Сессия регистрации истекла — войдите снова", "error"));
+    } else if (auth === "reset") {
+      const token = params.get("token") || "";
+      cleanAll();
+      setResetToken(token);
+      setShowReset(true);
     } else if (auth === "error") {
       const reason = params.get("reason") || "";
-      clean();
+      cleanAll();
       const messages = {
         google_denied: "Вход через Google отменён",
         state: "Ошибка безопасности входа — попробуйте снова",
@@ -97,8 +126,11 @@ export default function App() {
         conflict: "Этот email уже занят",
         disabled: "Аккаунт отключён",
         google_disabled: "Вход через Google не настроен",
+        verify_token: "Ссылка подтверждения недействительна или устарела",
       };
-      toast(messages[reason] || "Ошибка входа через Google", "error");
+      toast(messages[reason] || "Ошибка входа", "error");
+    } else {
+      clean();
     }
   }, [loadMe]);
 
@@ -170,14 +202,25 @@ export default function App() {
   }, [user, loadModels, loadGallery]);
 
   async function onLogin(form, rememberDevice) {
+    const emailOrUser = String(form.get("username") || "").trim();
     try {
-      await api.login(form.get("username"), form.get("password"), form.get("totp"), rememberDevice);
+      await api.login(emailOrUser, form.get("password"), form.get("totp"), rememberDevice);
       clearLegacyToken();
       setShowLogin(false);
       await loadMe();
       toast("Вход выполнен");
     } catch (err) {
-      toast(err.message, "error");
+      const msg = err.message || "";
+      if (err.status === 403 && /не подтвержд/i.test(msg) && emailOrUser.includes("@")) {
+        try {
+          await api.resendVerification(emailOrUser);
+          toast("Email не подтверждён — отправили письмо ещё раз", "error");
+          return;
+        } catch {
+          /* fall through */
+        }
+      }
+      toast(msg, "error");
     }
   }
 
@@ -197,11 +240,55 @@ export default function App() {
     e.preventDefault();
     const form = new FormData(e.target);
     try {
-      await api.register(form.get("username"), form.get("email"), form.get("password"));
+      const result = await api.register(form.get("username"), form.get("email"), form.get("password"));
       clearLegacyToken();
       setShowRegister(false);
+      if (result?.needs_verification) {
+        toast(result.message || "Проверьте почту — подтвердите email");
+        return;
+      }
       await loadMe();
       toast("Регистрация успешна");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  }
+
+  async function onForgot(email) {
+    try {
+      const result = await api.forgotPassword(email);
+      setShowForgot(false);
+      toast(result?.message || "Если аккаунт есть — письмо отправлено");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  }
+
+  async function onReset(token, password) {
+    try {
+      await api.resetPassword(token, password);
+      clearLegacyToken();
+      setShowReset(false);
+      setResetToken("");
+      await loadMe();
+      toast("Пароль обновлён");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  }
+
+  async function onCompleteProfile(username) {
+    try {
+      const result = await api.completeProfile(username);
+      clearLegacyToken();
+      setShowCompleteProfile(false);
+      setProfileDraft(null);
+      if (result?.token_type === "pending_2fa") {
+        setShowTotpComplete(true);
+        return;
+      }
+      await loadMe();
+      toast("Аккаунт готов");
     } catch (err) {
       toast(err.message, "error");
     }
@@ -364,22 +451,46 @@ export default function App() {
         showLogin={showLogin}
         showRegister={showRegister}
         showTotpComplete={showTotpComplete}
+        showCompleteProfile={showCompleteProfile}
+        showForgot={showForgot}
+        showReset={showReset}
+        resetToken={resetToken}
+        profileDraft={profileDraft}
         onCloseLogin={() => setShowLogin(false)}
         onCloseRegister={() => setShowRegister(false)}
         onCloseTotpComplete={() => setShowTotpComplete(false)}
+        onCloseCompleteProfile={() => {
+          setShowCompleteProfile(false);
+          setProfileDraft(null);
+        }}
+        onCloseForgot={() => setShowForgot(false)}
+        onCloseReset={() => {
+          setShowReset(false);
+          setResetToken("");
+        }}
         onOpenRegister={() => {
           setShowLogin(false);
+          setShowForgot(false);
           setShowRegister(true);
         }}
         onOpenLogin={() => {
           setShowRegister(false);
+          setShowForgot(false);
           setShowLogin(true);
+        }}
+        onOpenForgot={() => {
+          setShowLogin(false);
+          setShowForgot(true);
         }}
         onLogin={onLogin}
         onRegister={onRegister}
         onTotpComplete={onTotpComplete}
+        onForgot={onForgot}
+        onReset={onReset}
+        onCompleteProfile={onCompleteProfile}
         googleEnabled={googleEnabled}
         passwordRegister={passwordRegister}
+        mailEnabled={mailEnabled}
         trustedDeviceDays={trustedDeviceDays}
       />
       {showTotp && user?.is_admin && !user.totp_enabled && (

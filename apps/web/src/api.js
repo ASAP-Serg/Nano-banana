@@ -60,6 +60,15 @@ export const api = {
     }),
   register: (username, email, password) =>
     request("/auth/register", { method: "POST", body: { username, email, password }, auth: false }),
+  forgotPassword: (email) =>
+    request("/auth/forgot-password", { method: "POST", body: { email }, auth: false }),
+  resetPassword: (token, new_password) =>
+    request("/auth/reset-password", { method: "POST", body: { token, new_password }, auth: false }),
+  resendVerification: (email) =>
+    request("/auth/resend-verification", { method: "POST", body: { email }, auth: false }),
+  profilePending: () => request("/auth/profile/pending", { auth: false }),
+  completeProfile: (username) =>
+    request("/auth/profile/complete", { method: "POST", body: { username }, auth: false }),
   logout: () => request("/auth/logout", { method: "POST", auth: false }),
   me: () => request("/auth/me"),
   changePassword: (current_password, new_password) =>

@@ -27,9 +27,20 @@ from nano_banana.google_oauth import (
     unique_username,
     username_from_google,
 )
+from nano_banana.email_tokens import (
+    PURPOSE_RESET,
+    PURPOSE_VERIFY,
+    consume_token,
+    issue_token,
+)
+from nano_banana.mail import mail_configured, send_reset_password_email, send_verify_email
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import (
+    CompleteProfileRequest,
+    ForgotPasswordRequest,
     PasswordChangeRequest,
+    ResendVerifyRequest,
+    ResetPasswordRequest,
     TotpCompleteRequest,
     TotpConfirmRequest,
     UsernameChangeRequest,
@@ -52,9 +63,11 @@ from nano_banana.trusted_device import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 COOKIE_NAME = "nb_access"
+PENDING_PROFILE_COOKIE = "nb_pending_profile"
 _LOGIN_FAIL = "Неверное имя пользователя/email или пароль"
 _BOOTSTRAP_LOCK_KEY = 742901001
 _PENDING_2FA_MINUTES = 5
+_PENDING_PROFILE_MINUTES = 15
 
 
 def _cookie_secure() -> bool:
@@ -166,8 +179,69 @@ def _user_response(db_user: User) -> UserResponse:
         totp_enabled=bool(getattr(db_user, "totp_enabled", False)),
         has_password=bool(db_user.hashed_password),
         google_linked=bool(getattr(db_user, "google_sub", None)),
+        email_verified=bool(getattr(db_user, "email_verified", False)),
         created_at=db_user.created_at,
     )
+
+
+def _set_pending_profile_cookie(response: Response, user_id: int, email: str, suggested: str) -> None:
+    expire = datetime.utcnow() + timedelta(minutes=_PENDING_PROFILE_MINUTES)
+    token = jwt.encode(
+        {
+            "uid": user_id,
+            "email": email,
+            "suggested": suggested,
+            "purpose": "pending_profile",
+            "exp": expire,
+        },
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+    response.set_cookie(
+        key=PENDING_PROFILE_COOKIE,
+        value=token,
+        max_age=_PENDING_PROFILE_MINUTES * 60,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        path=COOKIE_PATH,
+    )
+
+
+def _clear_pending_profile_cookie(response: Response) -> None:
+    for path in (COOKIE_PATH, "/"):
+        response.delete_cookie(
+            key=PENDING_PROFILE_COOKIE,
+            path=path,
+            samesite="lax",
+            secure=_cookie_secure(),
+        )
+
+
+def _read_pending_profile(raw: Optional[str]) -> Optional[dict]:
+    if not raw:
+        return None
+    try:
+        payload = jwt.decode(raw, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("purpose") != "pending_profile":
+            return None
+        return {
+            "uid": int(payload["uid"]),
+            "email": str(payload.get("email") or ""),
+            "suggested": str(payload.get("suggested") or ""),
+        }
+    except (JWTError, TypeError, ValueError, KeyError):
+        return None
+
+
+def _verify_link(raw_token: str) -> str:
+    base = _frontend_base().rstrip("/")
+    return f"{base}/api/v1/auth/verify-email?token={raw_token}"
+
+
+def _reset_link(raw_token: str) -> str:
+    base = _frontend_base().rstrip("/")
+    return f"{base}/?auth=reset&token={raw_token}"
 
 
 def _verify_totp(user: User, code: Optional[str]) -> bool:
@@ -205,14 +279,17 @@ async def _finish_login(
 
 @router.get("/providers")
 async def auth_providers():
+    public_reg = bool(settings.SECURITY_ALLOW_PUBLIC_REGISTER)
     return {
         "google": google_oauth_configured(),
-        "password_register": bool(settings.SECURITY_ALLOW_PUBLIC_REGISTER),
+        "password_register": public_reg,
+        "mail": mail_configured(),
+        "email_verify_required": bool(settings.SECURITY_REQUIRE_EMAIL_VERIFY) and mail_configured(),
         "trusted_device_days": int(settings.SECURITY_TRUSTED_DEVICE_DAYS),
     }
 
 
-@router.post("/register", response_model=Token)
+@router.post("/register")
 async def register(
     user_data: UserCreateRequest,
     request: Request,
@@ -235,10 +312,17 @@ async def register(
             if not (bootstrap_ok and users_count == 0):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Регистрация отключена. Войдите через Google или обратитесь к администратору.",
+                    detail="Регистрация паролем отключена. Войдите через Google.",
                 )
+        if settings.SECURITY_ALLOW_PUBLIC_REGISTER and settings.SECURITY_REQUIRE_EMAIL_VERIFY:
+            if not mail_configured() and not (bootstrap_ok and users_count == 0):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Почта не настроена — регистрация временно недоступна. Войдите через Google.",
+                )
+        email_norm = str(user_data.email).strip().lower()
         existing_user = session.query(User).filter(
-            or_(User.username == user_data.username, User.email == user_data.email)
+            or_(User.username == user_data.username, User.email == email_norm)
         ).first()
         if existing_user:
             raise HTTPException(
@@ -246,17 +330,20 @@ async def register(
                 detail="Не удалось зарегистрироваться. Проверьте данные или войдите.",
             )
         make_admin = users_count == 0 and bootstrap_ok
+        verified = make_admin or not (
+            settings.SECURITY_REQUIRE_EMAIL_VERIFY and mail_configured()
+        )
         new_user = User(
             username=user_data.username,
-            email=user_data.email,
+            email=email_norm,
             hashed_password=hashed_password,
             is_active=True,
             is_admin=make_admin,
             token_version=0,
-            email_verified=False,
+            email_verified=verified,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
-            last_login=datetime.utcnow(),
+            last_login=datetime.utcnow() if verified else None,
         )
         session.add(new_user)
         try:
@@ -268,9 +355,26 @@ async def register(
                 detail="Не удалось зарегистрироваться. Проверьте данные или войдите.",
             ) from None
         session.refresh(new_user)
+
+        if not verified:
+            raw = issue_token(session, new_user.id, PURPOSE_VERIFY, hours=24)
+            session.commit()
+            send_verify_email(email_norm, _verify_link(raw), new_user.username)
+            return {
+                "ok": True,
+                "needs_verification": True,
+                "message": "Мы отправили письмо со ссылкой. Подтвердите email, затем войдите.",
+            }
+
         access = await auth_service.create_access_token(new_user)
         _set_access_cookie(response, access)
-        return Token(access_token="", refresh_token="", token_type="cookie")
+        return {
+            "ok": True,
+            "needs_verification": False,
+            "access_token": "",
+            "refresh_token": "",
+            "token_type": "cookie",
+        }
 
 
 @router.post("/login", response_model=Token)
@@ -292,10 +396,11 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         "Слишком много попыток входа. Попробуйте позже.",
     )
     with db_service.get_session() as session:
+        raw_ident = user_data.username_or_email.strip()
         user = session.query(User).filter(
             or_(
-                User.username == user_data.username_or_email,
-                User.email == user_data.username_or_email,
+                User.username == raw_ident,
+                User.email == ident,
             )
         ).first()
         hashed = (
@@ -306,6 +411,17 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         password_ok = auth_service.verify_password(user_data.password, hashed)
         if not user or not user.hashed_password or not password_ok or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
+
+        if (
+            settings.SECURITY_REQUIRE_EMAIL_VERIFY
+            and mail_configured()
+            and not getattr(user, "email_verified", False)
+            and not getattr(user, "google_sub", None)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Email не подтверждён. Проверьте почту — можно запросить письмо снова.",
+            )
 
         totp_just_ok = False
         if getattr(user, "totp_enabled", False):
@@ -344,7 +460,137 @@ async def logout(request: Request, response: Response):
     _clear_access_cookie(response)
     _clear_trusted_cookie(response)
     _clear_pending_2fa_cookie(response)
+    _clear_pending_profile_cookie(response)
     return {"ok": True}
+
+
+@router.get("/verify-email")
+async def verify_email(token: str, response: Response):
+    with db_service.get_session() as session:
+        uid = consume_token(session, token, PURPOSE_VERIFY)
+        if uid is None:
+            return _auth_redirect({"auth": "error", "reason": "verify_token"})
+        user = session.query(User).filter(User.id == uid).first()
+        if not user or not user.is_active:
+            return _auth_redirect({"auth": "error", "reason": "verify_token"})
+        user.email_verified = True
+        session.commit()
+        session.refresh(user)
+        access = await auth_service.create_access_token(user)
+    redirect = _auth_redirect({"auth": "verified"})
+    _set_access_cookie(redirect, access)
+    return redirect
+
+
+@router.post("/resend-verification")
+async def resend_verification(body: ResendVerifyRequest, request: Request):
+    check_rate_limit(
+        "resend-verify",
+        client_ip_from_request(request),
+        5,
+        3600,
+        "Слишком много писем. Попробуйте позже.",
+    )
+    # Always same response — no email enumeration.
+    msg = {"ok": True, "message": "Если аккаунт существует и не подтверждён — письмо отправлено."}
+    if not mail_configured():
+        return msg
+    email = str(body.email).strip().lower()
+    with db_service.get_session() as session:
+        user = session.query(User).filter(User.email == email).first()
+        if user and user.is_active and not user.email_verified and user.hashed_password:
+            raw = issue_token(session, user.id, PURPOSE_VERIFY, hours=24)
+            session.commit()
+            send_verify_email(email, _verify_link(raw), user.username)
+    return msg
+
+
+@router.post("/forgot-password")
+async def forgot_password(body: ForgotPasswordRequest, request: Request):
+    check_rate_limit(
+        "forgot-password",
+        client_ip_from_request(request),
+        5,
+        3600,
+        "Слишком много запросов. Попробуйте позже.",
+    )
+    msg = {"ok": True, "message": "Если аккаунт существует — письмо со ссылкой отправлено."}
+    if not mail_configured():
+        raise HTTPException(status_code=503, detail="Почта не настроена")
+    email = str(body.email).strip().lower()
+    with db_service.get_session() as session:
+        user = session.query(User).filter(User.email == email).first()
+        if user and user.is_active and user.hashed_password:
+            raw = issue_token(session, user.id, PURPOSE_RESET, hours=1)
+            session.commit()
+            send_reset_password_email(email, _reset_link(raw), user.username)
+    return msg
+
+
+@router.post("/reset-password")
+async def reset_password(body: ResetPasswordRequest, response: Response):
+    with db_service.get_session() as session:
+        uid = consume_token(session, body.token, PURPOSE_RESET)
+        if uid is None:
+            raise HTTPException(status_code=400, detail="Ссылка недействительна или устарела")
+        user = session.query(User).filter(User.id == uid).first()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=400, detail="Ссылка недействительна или устарела")
+        user.hashed_password = auth_service.get_password_hash(body.new_password)
+        user.email_verified = True
+        user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+        revoke_all_trusted_devices(session, user.id)
+        session.commit()
+        session.refresh(user)
+        access = await auth_service.create_access_token(user)
+        _set_access_cookie(response, access)
+        _clear_trusted_cookie(response)
+    return {"ok": True}
+
+
+@router.get("/profile/pending")
+async def profile_pending(request: Request):
+    data = _read_pending_profile(request.cookies.get(PENDING_PROFILE_COOKIE))
+    if not data:
+        raise HTTPException(status_code=404, detail="Нет незавершённой регистрации")
+    return {
+        "email": data["email"],
+        "suggested_username": data["suggested"],
+    }
+
+
+@router.post("/profile/complete", response_model=Token)
+async def profile_complete(
+    body: CompleteProfileRequest,
+    request: Request,
+    response: Response,
+):
+    data = _read_pending_profile(request.cookies.get(PENDING_PROFILE_COOKIE))
+    if not data:
+        raise HTTPException(status_code=401, detail="Сессия регистрации истекла — войдите снова")
+    with db_service.get_session() as session:
+        user = session.query(User).filter(User.id == data["uid"]).first()
+        if not user or not user.is_active:
+            _clear_pending_profile_cookie(response)
+            raise HTTPException(status_code=401, detail="Сессия регистрации истекла — войдите снова")
+        taken = session.query(User).filter(User.username == body.username, User.id != user.id).first()
+        if taken:
+            raise HTTPException(status_code=409, detail="Это имя уже занято")
+        user.username = body.username
+        user.email_verified = True
+        session.commit()
+        session.refresh(user)
+        if getattr(user, "totp_enabled", False):
+            trusted = find_valid_trusted_device(session, user.id, request.cookies.get(TRUSTED_COOKIE))
+            if not trusted:
+                _clear_pending_profile_cookie(response)
+                _set_pending_2fa_cookie(response, user.id)
+                return Token(access_token="", refresh_token="", token_type="pending_2fa")
+        result = await _finish_login(
+            response, session, user, request, remember_device=False, totp_just_ok=False
+        )
+        _clear_pending_profile_cookie(response)
+        return result
 
 
 @router.delete("/trusted-devices")
@@ -582,6 +828,7 @@ async def google_callback(
     except ValueError:
         return _auth_redirect({"auth": "error", "reason": "token"})
 
+    is_new_google_user = False
     with db_service.get_session() as session:
         user = session.query(User).filter(User.google_sub == info["sub"]).first()
         if not user:
@@ -591,8 +838,9 @@ async def google_callback(
                 user.email_verified = True
             else:
                 base_name = username_from_google(info["email"], info.get("name") or "")
+                suggested = unique_username(session, User, base_name)
                 user = User(
-                    username=unique_username(session, User, base_name),
+                    username=suggested,
                     email=info["email"],
                     hashed_password=None,
                     is_active=True,
@@ -602,9 +850,10 @@ async def google_callback(
                     email_verified=True,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow(),
-                    last_login=datetime.utcnow(),
+                    last_login=None,
                 )
                 session.add(user)
+                is_new_google_user = True
             try:
                 session.commit()
                 session.refresh(user)
@@ -614,6 +863,16 @@ async def google_callback(
 
         if not user.is_active:
             return _auth_redirect({"auth": "error", "reason": "disabled"})
+
+        # New Google account → confirm display name + show email before session.
+        if is_new_google_user:
+            suggested = user.username
+            redirect = _auth_redirect({"auth": "complete_profile"})
+            redirect.delete_cookie(
+                OAUTH_STATE_COOKIE, path=COOKIE_PATH, samesite="lax", secure=_cookie_secure()
+            )
+            _set_pending_profile_cookie(redirect, user.id, user.email, suggested)
+            return redirect
 
         if getattr(user, "totp_enabled", False):
             trusted = find_valid_trusted_device(

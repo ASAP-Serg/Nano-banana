@@ -674,7 +674,28 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         api = (root / "api.js").read_text(encoding="utf-8")
         self.assertIn("Продолжить с Google", modals)
         self.assertIn("Продолжить с email", modals)
+        self.assertIn("Забыли пароль", modals)
+        self.assertIn("completeProfile", api)
+        self.assertIn("forgotPassword", api)
+        self.assertIn("resetPassword", api)
         self.assertIn("googleStartUrl", api)
         self.assertIn("totpComplete", api)
         self.assertIn("revokeTrustedDevices", api)
+
+    def test_auth_router_has_email_flows(self):
+        from pathlib import Path
+
+        auth_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "auth.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("/verify-email", auth_router)
+        self.assertIn("/forgot-password", auth_router)
+        self.assertIn("/reset-password", auth_router)
+        self.assertIn("/profile/complete", auth_router)
+        self.assertIn("send_verify_email", auth_router)
 
