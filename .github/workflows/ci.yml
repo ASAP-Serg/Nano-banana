@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SECRET_KEY: ci-secret-key-min-32-characters-long
+      POSTGRES_PASSWORD: test-strong-postgres-password
+      MINIO_ACCESS_KEY: testminioaccess12
+      MINIO_SECRET_KEY: test-strong-minio-secret-key
+      DATA_ENCRYPTION_KEY: test-data-encryption-key-min-32-xx
+      REDIS_PASSWORD: test-redis-password-not-weak-xx
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,3 +40,40 @@ jobs:
         run: |
           docker build -f deploy/docker/Dockerfile.backend -t nano-banana-backend:${{ github.sha }} .
           docker build -f deploy/docker/Dockerfile.web -t nano-banana-web:${{ github.sha }} .
+
+  security:
+    runs-on: ubuntu-latest
+    env:
+      SECRET_KEY: ci-secret-key-min-32-characters-long
+      POSTGRES_PASSWORD: test-strong-postgres-password
+      MINIO_ACCESS_KEY: testminioaccess12
+      MINIO_SECRET_KEY: test-strong-minio-secret-key
+      DATA_ENCRYPTION_KEY: test-data-encryption-key-min-32-xx
+      REDIS_PASSWORD: test-redis-password-not-weak-xx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Python deps audit
+        run: |
+          pip install -r requirements.txt pip-audit
+          # Fail on known vulnerable packages; pin/upgrade in requirements.txt when this breaks.
+          python -m pip_audit -r requirements.txt
+      - name: Bandit SAST
+        run: |
+          pip install bandit
+          # -ll: medium+ only (skip noisy lows). Exclude tests.
+          python -m bandit -r apps packages -ll -x '*/tests/*,*/node_modules/*'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: npm audit (prod)
+        working-directory: apps/web
+        run: |
+          npm ci
+          # Fail on high/critical in production dependency tree.
+          npm audit --omit=dev --audit-level=high

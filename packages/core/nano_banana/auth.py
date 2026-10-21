@@ -4,7 +4,8 @@
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 import bcrypt
 from fastapi import Cookie, Depends, HTTPException, status
 from nano_banana.config import settings
@@ -147,7 +148,7 @@ class AuthService:
 
         except HTTPException:
             raise
-        except JWTError as e:
+        except PyJWTError as e:
             logger.warning("Token decode error: %s", type(e).__name__)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

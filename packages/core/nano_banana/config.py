@@ -205,6 +205,13 @@ class Settings(BaseSettings):
         if algo != "HS256":
             raise ValueError("ALGORITHM must be HS256")
         if self.is_production:
+            cors_parts = {
+                o.strip() for o in (self.CORS_ORIGINS or "").split(",") if o.strip()
+            }
+            if not cors_parts or "*" in cors_parts:
+                raise ValueError(
+                    "CORS_ORIGINS must list explicit origins in production (no *)"
+                )
             dek = (self.DATA_ENCRYPTION_KEY or "").strip()
             if len(dek) < 32 or dek == (self.SECRET_KEY or "").strip():
                 raise ValueError(

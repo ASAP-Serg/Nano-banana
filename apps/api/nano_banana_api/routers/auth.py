@@ -8,7 +8,8 @@ from urllib.parse import urlencode
 import pyotp
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError
 from sqlalchemy import or_, text
 from sqlalchemy.exc import IntegrityError
 
@@ -165,7 +166,7 @@ def _read_pending_2fa_user_id(raw: Optional[str]) -> Optional[int]:
             return None
         uid = payload.get("uid")
         return int(uid) if uid is not None else None
-    except (JWTError, TypeError, ValueError):
+    except (PyJWTError, TypeError, ValueError):
         return None
 
 
@@ -236,7 +237,7 @@ def _read_pending_profile(raw: Optional[str]) -> Optional[dict]:
             "email": str(payload.get("email") or ""),
             "suggested": str(payload.get("suggested") or ""),
         }
-    except (JWTError, TypeError, ValueError, KeyError):
+    except (PyJWTError, TypeError, ValueError, KeyError):
         return None
 
 
@@ -463,11 +464,16 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
 async def logout(request: Request, response: Response):
     raw_trusted = request.cookies.get(TRUSTED_COOKIE)
     access = request.cookies.get(COOKIE_NAME)
-    if access and raw_trusted:
+    if access:
         try:
             payload = await auth_service._user_from_token(access)
             with db_service.get_session() as session:
-                revoke_trusted_device_by_token(session, payload.user_id, raw_trusted)
+                db_user = session.query(User).filter(User.id == payload.user_id).first()
+                if db_user:
+                    # Invalidate any stolen copy of this JWT until natural expiry.
+                    db_user.token_version = int(getattr(db_user, "token_version", 0) or 0) + 1
+                if raw_trusted:
+                    revoke_trusted_device_by_token(session, payload.user_id, raw_trusted)
                 session.commit()
         except Exception:
             pass

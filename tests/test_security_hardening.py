@@ -862,3 +862,153 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         self.assertIn("Content-Security-Policy", assets)
         self.assertIn("X-Frame-Options", assets)
 
+
+class TestOwaspSecurityContracts(unittest.TestCase):
+    """Defensive OWASP-mapped contracts for scale-up / external pentest evidence."""
+
+    def _repo(self, *parts: str) -> str:
+        from pathlib import Path
+
+        return (Path(__file__).resolve().parents[1].joinpath(*parts)).read_text(encoding="utf-8")
+
+    def test_unverified_and_unapproved_blocked_from_generate(self):
+        from types import SimpleNamespace
+
+        from nano_banana.access import generate_block_reason
+        from nano_banana.config import settings
+
+        unverified = SimpleNamespace(
+            is_admin=False,
+            google_sub=None,
+            email_verified=False,
+            is_approved=True,
+            is_active=True,
+        )
+        unapproved = SimpleNamespace(
+            is_admin=False,
+            google_sub=None,
+            email_verified=True,
+            is_approved=False,
+            is_active=True,
+        )
+        if settings.SECURITY_REQUIRE_EMAIL_VERIFY:
+            self.assertIsNotNone(generate_block_reason(unverified))
+        if settings.SECURITY_REQUIRE_ADMIN_APPROVAL:
+            self.assertIsNotNone(generate_block_reason(unapproved))
+        images = self._repo("apps", "api", "nano_banana_api", "routers", "images.py")
+        self.assertIn("require_sensitive_access", images)
+
+    def test_logout_bumps_token_version(self):
+        auth = self._repo("apps", "api", "nano_banana_api", "routers", "auth.py")
+        logout_idx = auth.find("async def logout")
+        self.assertGreater(logout_idx, 0)
+        logout_block = auth[logout_idx : logout_idx + 900]
+        self.assertIn("token_version", logout_block)
+        self.assertIn("token_version = int", logout_block)
+
+    def test_verify_and_reset_consume_body_not_query_login(self):
+        auth = self._repo("apps", "api", "nano_banana_api", "routers", "auth.py")
+        # GET verify only redirects into SPA fragment; does not consume token / auto-login.
+        self.assertIn("Bounce into SPA with token in the fragment", auth)
+        self.assertIn("auth=verify#token=", auth)
+        self.assertIn("auth=reset#token=", auth)
+        self.assertIn("await _consume_verify_and_login(body.token, response)", auth)
+        self.assertIn("consume_token(session, body.token, PURPOSE_RESET)", auth)
+        self.assertNotIn("auth=reset&token=", auth)
+
+    def test_csrf_cookie_requires_origin_bearer_alone_ok(self):
+        main = self._repo("apps", "api", "nano_banana_api", "main.py")
+        self.assertIn("CSRF origin required", main)
+        self.assertIn("bearer_ok and not has_auth_cookie", main)
+        self.assertIn('startswith("bearer ")', main)
+        # Fake Authorization must not skip CSRF when cookies present.
+        self.assertIn("has_auth_cookie", main)
+
+    def test_session_cookies_httponly_samesite_strict(self):
+        auth = self._repo("apps", "api", "nano_banana_api", "routers", "auth.py")
+        self.assertIn('samesite="strict"', auth)
+        self.assertIn("httponly=True", auth)
+        self.assertGreaterEqual(auth.count('samesite="strict"'), 4)
+        self.assertGreaterEqual(auth.count("httponly=True"), 3)
+
+    def test_delete_me_clears_session_cookies(self):
+        auth = self._repo("apps", "api", "nano_banana_api", "routers", "auth.py")
+        delete_idx = auth.find("async def delete_my_account")
+        self.assertGreater(delete_idx, 0)
+        block = auth[delete_idx : delete_idx + 2500]
+        self.assertIn("_clear_access_cookie", block)
+        self.assertIn("_clear_trusted_cookie", block)
+        self.assertIn("session.delete(db_user)", block)
+
+    def test_storage_nginx_blocks_console_and_minio(self):
+        storage = self._repo("deploy", "nginx", "storage.ooneclickk.ru.conf")
+        self.assertIn("location = /console { return 404; }", storage)
+        self.assertIn("location /console/ { return 404; }", storage)
+        self.assertIn("location = /minio { return 404; }", storage)
+        self.assertIn("location /minio/ { return 404; }", storage)
+        self.assertIn("limit_except GET HEAD", storage)
+        self.assertIn("X-Amz-Algorithm=", storage)
+
+    def test_html_username_and_path_traversal_rejected(self):
+        from pydantic import ValidationError
+
+        from nano_banana.config import Settings
+        from nano_banana.schemas import UserCreateRequest
+        from nano_banana.security import is_allowed_reference_url
+
+        with self.assertRaises(ValidationError):
+            UserCreateRequest(
+                username="<b>x</b>",
+                email="user@example.com",
+                password="1234567890",
+            )
+        cfg = Settings(
+            SECRET_KEY="x" * 64,
+            POSTGRES_PASSWORD="test-strong-postgres-password",
+            MINIO_ACCESS_KEY="testminioaccess12",
+            MINIO_SECRET_KEY="test-strong-minio-secret-key",
+            MINIO_PUBLIC_URL="https://storage.example.com",
+            MINIO_BUCKET="nano",
+            DATA_ENCRYPTION_KEY="y" * 64,
+            REDIS_PASSWORD="test-redis-password-not-weak-xx",
+        )
+        evil = "https://storage.example.com/nano/images/../secrets/key"
+        self.assertFalse(is_allowed_reference_url(evil, cfg))
+        s3 = self._repo("packages", "core", "nano_banana", "storage", "s3.py")
+        self.assertIn('if ".." in path or path.startswith("/") or "\\\\" in path:', s3)
+
+    def test_prod_forbids_cors_star_and_s3_public_read(self):
+        from nano_banana.config import Settings
+
+        base = dict(
+            SECRET_KEY="x" * 64,
+            POSTGRES_PASSWORD="test-strong-postgres-password",
+            MINIO_ACCESS_KEY="testminioaccess12",
+            MINIO_SECRET_KEY="test-strong-minio-secret-key",
+            API_URL="https://app.example.com",
+            DATA_ENCRYPTION_KEY="y" * 64,
+            REDIS_PASSWORD="test-redis-password-not-weak-xx",
+            SECURITY_GENERATE_MAX_REQUESTS=10,
+            SECURITY_GENERATE_IP_MAX_REQUESTS=120,
+            CORS_ORIGINS="https://app.example.com",
+        )
+        with self.assertRaises(Exception):
+            Settings(**{**base, "CORS_ORIGINS": "*"})
+        with self.assertRaises(Exception):
+            Settings(**{**base, "S3_PUBLIC_READ": True})
+        main = self._repo("apps", "api", "nano_banana_api", "main.py")
+        self.assertIn("CORS_ORIGINS=* запрещён в production", main)
+
+    def test_host_proxy_snippet_overwrites_x_real_ip(self):
+        snippet = self._repo("deploy", "nginx", "host.proxy.snippet.conf")
+        self.assertIn("proxy_set_header X-Real-IP $remote_addr;", snippet)
+        self.assertIn("overwrite X-Real-IP", snippet)
+
+    def test_jwt_uses_pyjwt_not_python_jose(self):
+        req = self._repo("requirements.txt")
+        self.assertIn("PyJWT", req)
+        self.assertNotIn("python-jose", req)
+        auth_core = self._repo("packages", "core", "nano_banana", "auth.py")
+        self.assertIn("from jwt.exceptions import PyJWTError", auth_core)
+        self.assertNotIn("from jose", auth_core)
+
