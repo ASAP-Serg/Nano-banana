@@ -90,12 +90,13 @@ async def generate_image(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     with db_service.get_session() as _sess:
+        from nano_banana.access import generate_block_reason
+
         _u = _sess.query(User).filter(User.id == user.user_id).first()
-        if _u and not bool(getattr(_u, "email_verified", False)) and not getattr(_u, "google_sub", None):
-            raise HTTPException(
-                status_code=403,
-                detail="Подтвердите email, прежде чем запускать генерации.",
-            )
+        if _u:
+            reason = generate_block_reason(_u)
+            if reason:
+                raise HTTPException(status_code=403, detail=reason)
     check_rate_limit(
         "generate-user",
         str(user.user_id),

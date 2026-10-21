@@ -66,6 +66,9 @@ export const api = {
     request("/auth/reset-password", { method: "POST", body: { token, new_password }, auth: false }),
   resendVerification: (email) =>
     request("/auth/resend-verification", { method: "POST", body: { email }, auth: false }),
+  updateEmail: (email, current_password = "") =>
+    request("/auth/email", { method: "POST", body: { email, current_password } }),
+  deleteAccount: (payload) => request("/auth/me", { method: "DELETE", body: payload }),
   profilePending: () => request("/auth/profile/pending", { auth: false }),
   completeProfile: (username) =>
     request("/auth/profile/complete", { method: "POST", body: { username }, auth: false }),
@@ -126,6 +129,10 @@ export const api = {
     request(`/admin/users/${id}/deactivate`, { method: "POST", body: { password } }),
   adminActivate: (id, password) =>
     request(`/admin/users/${id}/activate`, { method: "POST", body: { password } }),
+  adminApprove: (id, password) =>
+    request(`/admin/users/${id}/approve`, { method: "POST", body: { password } }),
+  adminRevokeApproval: (id, password) =>
+    request(`/admin/users/${id}/revoke-approval`, { method: "POST", body: { password } }),
   adminDeleteUser: (id, password) =>
     request(`/admin/users/${id}`, { method: "DELETE", body: { password } }),
   adminGeneration: (id) => request(`/admin/generations/${id}`),

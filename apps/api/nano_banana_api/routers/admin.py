@@ -149,6 +149,7 @@ async def admin_list_users(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
     search: Optional[str] = None,
     idle_only: bool = Query(False),
+    pending_only: bool = Query(False),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -165,6 +166,10 @@ async def admin_list_users(
         if search:
             needle = f"%{search.strip()}%"
             query = query.filter(or_(User.username.ilike(needle), User.email.ilike(needle)))
+        if pending_only:
+            query = query.filter(User.is_admin.is_(False)).filter(
+                or_(User.is_approved.is_(False), User.email_verified.is_(False))
+            )
         if idle_only:
             query = query.filter(User.is_admin.is_(False)).filter(
                 or_(
@@ -183,6 +188,8 @@ async def admin_list_users(
                     "email": u.email,
                     "is_admin": bool(u.is_admin),
                     "is_operator": bool(getattr(u, "is_operator", False)),
+                    "is_approved": bool(getattr(u, "is_approved", False)) or bool(u.is_admin),
+                    "email_verified": bool(getattr(u, "email_verified", False)),
                     "is_active": bool(u.is_active),
                     "totp_enabled": bool(getattr(u, "totp_enabled", False)),
                     "created_at": u.created_at.isoformat() if u.created_at else None,
@@ -429,6 +436,58 @@ def _purge_user_files(session, user_id: int):
     gens = session.query(Generation).filter(Generation.user_id == user_id).all()
     for gen in gens:
         delete_generation_assets(storage, gen)
+
+
+@router.post("/users/{target_user_id}/approve")
+async def admin_approve_user(
+    target_user_id: int,
+    body: AdminPasswordRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    with db_service.get_session() as session:
+        target = _target_user(session, target_user_id)
+        _forbid_self(user, target)
+        target.is_approved = True
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="approve_user",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
+        session.commit()
+        return {"message": f"Доступ открыт для {target.username}"}
+
+
+@router.post("/users/{target_user_id}/revoke-approval")
+async def admin_revoke_approval(
+    target_user_id: int,
+    body: AdminPasswordRequest,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    _require_admin(user)
+    _rate_limit_admin_write(user.user_id)
+    _verify_admin_password(user, body.password)
+    with db_service.get_session() as session:
+        target = _target_user(session, target_user_id)
+        _forbid_self(user, target)
+        if target.is_admin:
+            raise HTTPException(status_code=400, detail="Админу approval не снимают")
+        target.is_approved = False
+        target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
+        revoke_all_trusted_devices(session, target.id)
+        _audit_admin_action(
+            session=session,
+            actor_admin_id=user.user_id,
+            action="revoke_approval",
+            target_user_id=target.id,
+            details={"target_username": target.username},
+        )
+        session.commit()
+        return {"message": f"Доступ к генерациям закрыт у {target.username}"}
 
 
 @router.post("/users/{target_user_id}/deactivate")
@@ -689,6 +748,13 @@ async def admin_overview(
             top_users = top_users[:20]
 
         total_spend = round(sum(v["amount"] for v in spend_by_user.values()), 4)
+        pending_approval = (
+            session.query(User)
+            .filter(User.is_admin.is_(False))
+            .filter(User.is_active.is_(True))
+            .filter(User.is_approved.is_(False))
+            .count()
+        )
 
         return {
             "period_days": period_days,
@@ -697,6 +763,7 @@ async def admin_overview(
             "active_users": active_users,
             "idle_users": idle_users,
             "idle_days": IDLE_GENERATION_DAYS,
+            "pending_approval": pending_approval,
             "generations_total": generations_total,
             "completed_total": completed_total,
             "failed_total": failed_total,

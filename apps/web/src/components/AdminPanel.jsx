@@ -35,6 +35,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
   const [pwModal, setPwModal] = useState(null);
   const [pwValue, setPwValue] = useState("");
   const [idleOnly, setIdleOnly] = useState(false);
+  const [pendingOnly, setPendingOnly] = useState(false);
   const [mosaicPrompts, setMosaicPrompts] = useState(null);
   const pageSize = 24;
 
@@ -57,10 +58,13 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
     }
   }
 
-  async function load(nextIdleOnly = idleOnly) {
+  async function load(nextIdleOnly = idleOnly, nextPendingOnly = pendingOnly) {
     try {
+      const params = {};
+      if (nextIdleOnly) params.idle_only = true;
+      if (nextPendingOnly) params.pending_only = true;
       const [u, o, f] = await Promise.all([
-        api.adminUsers(nextIdleOnly ? { idle_only: true } : {}),
+        api.adminUsers(params),
         api.adminOverview(),
         api.adminFilters(),
       ]);
@@ -128,6 +132,11 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                 <div className="col-md-3">
                   <div className="card p-3">
                     Без генераций {overview.idle_days || 60}+ дн.: {overview.idle_users ?? 0}
+                  </div>
+                </div>
+                <div className="col-md-3">
+                  <div className="card p-3">
+                    Ждут апрува: {overview.pending_approval ?? 0}
                   </div>
                 </div>
               </div>
@@ -201,12 +210,28 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                 <input
                   className="form-check-input"
                   type="checkbox"
+                  id="adminPendingOnly"
+                  checked={pendingOnly}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setPendingOnly(next);
+                    load(idleOnly, next);
+                  }}
+                />
+                <label className="form-check-label" htmlFor="adminPendingOnly">
+                  ждут апрува / email
+                </label>
+              </div>
+              <div className="form-check">
+                <input
+                  className="form-check-input"
+                  type="checkbox"
                   id="adminIdleOnly"
                   checked={idleOnly}
                   onChange={(e) => {
                     const next = e.target.checked;
                     setIdleOnly(next);
-                    load(next);
+                    load(next, pendingOnly);
                   }}
                 />
                 <label className="form-check-label" htmlFor="adminIdleOnly">
@@ -215,7 +240,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
               </div>
             </div>
             <p className="form-text text-muted mt-0 mb-2">
-              Мёртвый — не админ и нет генераций 60+ дней (или аккаунт старше 60 дней без единой генерации). Удаление только вручную.
+              Новые — апрув вручную. Без подтверждённого email 60+ дней без входа — авто-выкл. Удаление вручную или самим юзером.
             </p>
             <div className="table-responsive">
             <table className="table table-sm">
@@ -226,6 +251,7 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                   <th>Email</th>
                     <th>Admin</th>
                     <th>Оператор</th>
+                  <th>Апрув</th>
                   <th>Статус</th>
                   <th>Генерации</th>
                   <th>Последняя генерация</th>
@@ -235,18 +261,37 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
               <tbody>
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="text-muted">
-                      {idleOnly ? "Нет аккаунтов без генераций 2+ месяцев." : "Нет пользователей."}
+                    <td colSpan={10} className="text-muted">
+                      {pendingOnly
+                        ? "Нет ожидающих."
+                        : idleOnly
+                          ? "Нет аккаунтов без генераций 2+ месяцев."
+                          : "Нет пользователей."}
                     </td>
                   </tr>
                 )}
                 {users.map((u) => (
-                  <tr key={u.id} className={u.is_idle ? "table-warning" : undefined}>
+                  <tr
+                    key={u.id}
+                    className={
+                      !u.is_approved && !u.is_admin
+                        ? "table-info"
+                        : u.is_idle
+                          ? "table-warning"
+                          : undefined
+                    }
+                  >
                     <td>{u.id}</td>
                     <td>{u.username}</td>
-                    <td>{u.email}</td>
+                    <td>
+                      {u.email}
+                      {!u.email_verified && !u.is_admin && (
+                        <span className="badge text-bg-secondary ms-1">email?</span>
+                      )}
+                    </td>
                     <td>{u.is_admin ? "да" : "нет"}</td>
                     <td>{u.is_operator ? "да" : "нет"}</td>
+                    <td>{u.is_admin || u.is_approved ? "да" : "нет"}</td>
                     <td>{u.is_active === false ? "выкл" : "активен"}</td>
                     <td>{u.generation_count ?? 0}</td>
                     <td>
@@ -257,6 +302,31 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                     </td>
                     <td>
                       <div className="d-flex flex-wrap gap-1">
+                        {!u.is_admin && (
+                          u.is_approved ? (
+                            <button
+                              className="btn btn-sm btn-outline-warning"
+                              onClick={() =>
+                                runUserAction("Закрыть доступ к генерациям", (password) =>
+                                  api.adminRevokeApproval(u.id, password)
+                                )
+                              }
+                            >
+                              Снять апрув
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-sm btn-success"
+                              onClick={() =>
+                                runUserAction("Открыть доступ к генерациям", (password) =>
+                                  api.adminApprove(u.id, password)
+                                )
+                              }
+                            >
+                              Апрув
+                            </button>
+                          )
+                        )}
                         {u.is_admin ? (
                           <button
                             className="btn btn-sm btn-outline-warning"

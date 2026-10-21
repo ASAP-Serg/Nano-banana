@@ -152,7 +152,9 @@ export default function AuthModals({
                     Создать аккаунт
                   </button>
                   {mailEnabled && (
-                    <p className="nb-auth-note">На почту придёт письмо со ссылкой — без подтверждения вход недоступен.</p>
+                    <p className="nb-auth-note">
+                      На почту придёт ссылка подтверждения. Генерации откроет администратор после проверки.
+                    </p>
                   )}
                 </form>
               ) : (

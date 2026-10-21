@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from nano_banana.auth import auth_service
 from nano_banana.config import settings
 from nano_banana.crypto import CryptoService
-from nano_banana.db.models import User
+from nano_banana.db.models import AdminAuditLog, Generation, User
 from nano_banana.db.session import db_service
 from nano_banana.google_oauth import (
     OAUTH_STATE_COOKIE,
@@ -37,17 +37,21 @@ from nano_banana.mail import mail_configured, send_reset_password_email, send_ve
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import (
     CompleteProfileRequest,
+    DeleteAccountRequest,
     ForgotPasswordRequest,
     PasswordChangeRequest,
     ResendVerifyRequest,
     ResetPasswordRequest,
     TotpCompleteRequest,
     TotpConfirmRequest,
+    UpdateEmailRequest,
     UsernameChangeRequest,
     UserCreateRequest,
     UserLoginRequest,
     UserResponse,
 )
+from nano_banana.generation.cleanup import delete_generation_assets
+from nano_banana.storage.s3 import MinioService
 from nano_banana.security import constant_time_secret_equal
 from nano_banana.tokens import Token, TokenPayload
 from nano_banana.totp_qr import otpauth_qr_data_url
@@ -176,6 +180,7 @@ def _user_response(db_user: User) -> UserResponse:
         is_active=bool(db_user.is_active),
         is_admin=bool(db_user.is_admin),
         is_operator=bool(getattr(db_user, "is_operator", False)),
+        is_approved=bool(getattr(db_user, "is_approved", False)) or bool(db_user.is_admin),
         totp_enabled=bool(getattr(db_user, "totp_enabled", False)),
         has_password=bool(db_user.hashed_password),
         google_linked=bool(getattr(db_user, "google_sub", None)),
@@ -338,12 +343,14 @@ async def register(
         verified = make_admin or not (
             settings.SECURITY_REQUIRE_EMAIL_VERIFY and mail_configured()
         )
+        approved = make_admin or not bool(settings.SECURITY_REQUIRE_ADMIN_APPROVAL)
         new_user = User(
             username=user_data.username,
             email=email_norm,
             hashed_password=hashed_password,
             is_active=True,
             is_admin=make_admin,
+            is_approved=approved,
             token_version=0,
             email_verified=verified,
             created_at=datetime.utcnow(),
@@ -365,10 +372,14 @@ async def register(
             raw = issue_token(session, new_user.id, PURPOSE_VERIFY, hours=24)
             session.commit()
             send_verify_email(email_norm, _verify_link(raw), new_user.username)
+            msg = "Мы отправили письмо со ссылкой. Подтвердите email, затем войдите."
+            if not approved:
+                msg += " После этого админ откроет доступ к генерациям."
             return {
                 "ok": True,
                 "needs_verification": True,
-                "message": "Мы отправили письмо со ссылкой. Подтвердите email, затем войдите.",
+                "needs_approval": not approved,
+                "message": msg,
             }
 
         access = await auth_service.create_access_token(new_user)
@@ -376,9 +387,13 @@ async def register(
         return {
             "ok": True,
             "needs_verification": False,
+            "needs_approval": not approved,
             "access_token": "",
             "refresh_token": "",
             "token_type": "cookie",
+            "message": None
+            if approved
+            else "Аккаунт создан. Генерации откроются после подтверждения администратором.",
         }
 
 
@@ -417,16 +432,7 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         if not user or not user.hashed_password or not password_ok or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
 
-        if (
-            settings.SECURITY_REQUIRE_EMAIL_VERIFY
-            and mail_configured()
-            and not getattr(user, "email_verified", False)
-            and not getattr(user, "google_sub", None)
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Email не подтверждён. Проверьте почту — можно запросить письмо снова.",
-            )
+        # Unverified / unapproved users may still log in — generate is gated separately.
 
         totp_just_ok = False
         if getattr(user, "totp_enabled", False):
@@ -508,6 +514,98 @@ async def resend_verification(body: ResendVerifyRequest, request: Request):
             session.commit()
             send_verify_email(email, _verify_link(raw), user.username)
     return msg
+
+
+@router.post("/email", response_model=UserResponse)
+async def update_email(
+    body: UpdateEmailRequest,
+    response: Response,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    """Set or change email; sends verification link. Required for legacy accounts."""
+    email_norm = str(body.email).strip().lower()
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user or not db_user.is_active:
+            raise HTTPException(status_code=401, detail="Не авторизован")
+        if db_user.hashed_password:
+            if not body.current_password or not auth_service.verify_password(
+                body.current_password, db_user.hashed_password
+            ):
+                raise HTTPException(status_code=401, detail="Неверный пароль")
+        taken = (
+            session.query(User)
+            .filter(User.email == email_norm, User.id != db_user.id)
+            .first()
+        )
+        if taken:
+            raise HTTPException(status_code=409, detail="Этот email уже занят")
+        db_user.email = email_norm
+        db_user.email_verified = False
+        db_user.updated_at = datetime.utcnow()
+        if not mail_configured():
+            session.commit()
+            session.refresh(db_user)
+            raise HTTPException(status_code=503, detail="Почта не настроена — напишите админу")
+        raw = issue_token(session, db_user.id, PURPOSE_VERIFY, hours=24)
+        session.commit()
+        session.refresh(db_user)
+        send_verify_email(email_norm, _verify_link(raw), db_user.username)
+        return _user_response(db_user)
+
+
+@router.delete("/me")
+async def delete_my_account(
+    body: DeleteAccountRequest,
+    response: Response,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=401, detail="Не авторизован")
+        if db_user.is_admin:
+            active_admins = (
+                session.query(User)
+                .filter(User.is_admin.is_(True), User.is_active.is_(True))
+                .count()
+            )
+            if active_admins <= 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Нельзя удалить последнего админа — сначала назначьте другого",
+                )
+        if db_user.hashed_password:
+            if not body.current_password or not auth_service.verify_password(
+                body.current_password, db_user.hashed_password
+            ):
+                raise HTTPException(status_code=401, detail="Неверный пароль")
+        else:
+            if (body.confirm or "").strip() != db_user.username:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Для удаления введите своё имя пользователя в поле подтверждения",
+                )
+        uid = db_user.id
+        username = db_user.username
+        storage = MinioService()
+        gens = session.query(Generation).filter(Generation.user_id == uid).all()
+        for gen in gens:
+            delete_generation_assets(storage, gen)
+        session.query(AdminAuditLog).filter(
+            or_(
+                AdminAuditLog.actor_admin_id == uid,
+                AdminAuditLog.target_user_id == uid,
+            )
+        ).delete(synchronize_session=False)
+        session.query(Generation).filter(Generation.user_id == uid).delete(synchronize_session=False)
+        session.delete(db_user)
+        session.commit()
+    _clear_access_cookie(response)
+    _clear_trusted_cookie(response)
+    _clear_pending_2fa_cookie(response)
+    _clear_pending_profile_cookie(response)
+    return {"ok": True, "message": f"Аккаунт {username} удалён"}
 
 
 @router.post("/forgot-password")
@@ -844,12 +942,14 @@ async def google_callback(
             else:
                 base_name = username_from_google(info["email"], info.get("name") or "")
                 suggested = unique_username(session, User, base_name)
+                approved = not bool(settings.SECURITY_REQUIRE_ADMIN_APPROVAL)
                 user = User(
                     username=suggested,
                     email=info["email"],
                     hashed_password=None,
                     is_active=True,
                     is_admin=False,
+                    is_approved=approved,
                     token_version=0,
                     google_sub=info["sub"],
                     email_verified=True,

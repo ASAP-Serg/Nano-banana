@@ -89,6 +89,7 @@ class UserResponse(BaseModel):
     is_active: bool
     is_admin: bool
     is_operator: bool = False
+    is_approved: bool = False
     totp_enabled: bool = False
     has_password: bool = True
     google_linked: bool = False
@@ -97,6 +98,18 @@ class UserResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class UpdateEmailRequest(BaseModel):
+    email: EmailStr
+    current_password: str = ""
+
+
+class DeleteAccountRequest(BaseModel):
+    """Self-delete. Password users must send current_password; Google-only — confirm=username."""
+
+    current_password: str = ""
+    confirm: str = ""
 
 
 class ForgotPasswordRequest(BaseModel):

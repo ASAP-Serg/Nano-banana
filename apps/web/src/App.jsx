@@ -407,6 +407,45 @@ export default function App() {
         onLogout={onLogout}
       />
       <StatusBar status={status} />
+      {user && !user.is_admin && (
+        <>
+          {!user.email_verified && !user.google_linked && (
+            <div className="container-fluid mt-3">
+              <div className="alert alert-warning mb-0 d-flex flex-wrap align-items-center gap-2">
+                <span>Подтвердите email — без этого генерации недоступны.</span>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-dark"
+                  onClick={() => setShowAccount(true)}
+                >
+                  Указать / подтвердить почту
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-link"
+                  onClick={async () => {
+                    try {
+                      await api.resendVerification(user.email);
+                      toast("Если аккаунт не подтверждён — письмо отправлено");
+                    } catch (err) {
+                      toast(err.message, "error");
+                    }
+                  }}
+                >
+                  Отправить письмо снова
+                </button>
+              </div>
+            </div>
+          )}
+          {user.is_approved === false && (
+            <div className="container-fluid mt-3">
+              <div className="alert alert-info mb-0">
+                Аккаунт на проверке у администратора. Войти можно, генерации откроют после апрува.
+              </div>
+            </div>
+          )}
+        </>
+      )}
       <main className="container-fluid my-4">
         <div className="nb-workspace">
           <div className="nb-workspace-form">
@@ -507,6 +546,13 @@ export default function App() {
           user={user}
           onClose={() => setShowAccount(false)}
           onUsernameChanged={(next) => setUser(next)}
+          onUserUpdated={(next) => setUser(next)}
+          onDeleted={() => {
+            clearLegacyToken();
+            setUser(null);
+            setGallery([]);
+            setShowAccount(false);
+          }}
         />
       )}
       {showKeys && (

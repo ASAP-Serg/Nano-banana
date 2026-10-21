@@ -698,4 +698,36 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         self.assertIn("/reset-password", auth_router)
         self.assertIn("/profile/complete", auth_router)
         self.assertIn("send_verify_email", auth_router)
+        self.assertIn('@router.post("/email"', auth_router)
+        self.assertIn('@router.delete("/me"', auth_router)
+        self.assertIn("is_approved", auth_router)
+
+    def test_admin_approval_endpoints_exist(self):
+        from pathlib import Path
+
+        admin_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "admin.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("/users/{target_user_id}/approve", admin_router)
+        self.assertIn("pending_only", admin_router)
+        self.assertIn("pending_approval", admin_router)
+
+    def test_access_helper_blocks_unapproved(self):
+        from types import SimpleNamespace
+        from nano_banana.access import generate_block_reason
+
+        u = SimpleNamespace(
+            is_admin=False,
+            google_sub=None,
+            email_verified=True,
+            is_approved=False,
+        )
+        reason = generate_block_reason(u)
+        self.assertIsNotNone(reason)
+        self.assertIn("администратор", reason.lower())
 

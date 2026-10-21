@@ -88,6 +88,10 @@ class Settings(BaseSettings):
     ADMIN_BOOTSTRAP_SECRET: str = ""
     SECURITY_TRUSTED_DEVICE_DAYS: int = 30
     SECURITY_REQUIRE_EMAIL_VERIFY: bool = True
+    # New signups wait for admin before generate; existing users migrated as approved.
+    SECURITY_REQUIRE_ADMIN_APPROVAL: bool = True
+    # Auto-deactivate: email not verified + no login for N days (admins skipped).
+    SECURITY_UNVERIFIED_INACTIVE_DAYS: int = 60
     GOOGLE_OAUTH_CLIENT_ID: str = ""
     GOOGLE_OAUTH_CLIENT_SECRET: str = ""
     GOOGLE_OAUTH_REDIRECT_URI: str = ""
