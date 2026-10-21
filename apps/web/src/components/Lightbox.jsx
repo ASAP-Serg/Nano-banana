@@ -1,9 +1,10 @@
 import { useEffect } from "react";
-import { downloadImage } from "../toast.js";
+import { downloadImage, isSafeMediaUrl } from "../toast.js";
 import { IconDownload } from "../icons.jsx";
 
 export default function Lightbox({ items, index, onClose, onIndex }) {
   const item = items[index];
+  const safeUrl = item?.result_url && isSafeMediaUrl(item.result_url) ? item.result_url : "";
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -59,17 +60,23 @@ export default function Lightbox({ items, index, onClose, onIndex }) {
             ›
           </button>
         )}
-        <img src={item.result_url} alt="" style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 8 }} />
+        {safeUrl ? (
+          <img src={safeUrl} alt="" style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 8 }} />
+        ) : (
+          <div className="text-light p-4">Изображение недоступно</div>
+        )}
         <div className="text-light text-center mt-2" style={{ maxWidth: "80%", fontSize: "0.9rem", opacity: 0.8 }}>
           {item.prompt}
         </div>
         <div className="text-light text-center mt-1" style={{ fontSize: "0.85rem", opacity: 0.7 }}>
           {index + 1} / {items.length}
         </div>
-        <button type="button" className="btn btn-sm btn-success mt-3 d-inline-flex align-items-center gap-2" onClick={() => downloadImage(item.result_url, item.prompt)}>
-          <IconDownload />
-          Скачать
-        </button>
+        {safeUrl && (
+          <button type="button" className="btn btn-sm btn-success mt-3 d-inline-flex align-items-center gap-2" onClick={() => downloadImage(safeUrl, item.prompt)}>
+            <IconDownload />
+            Скачать
+          </button>
+        )}
       </div>
     </div>
   );

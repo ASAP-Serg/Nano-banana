@@ -830,3 +830,31 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("html.escape", mail)
 
+    def test_reset_link_uses_url_fragment(self):
+        from pathlib import Path
+
+        auth_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "auth.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("auth=reset#token=", auth_router)
+        self.assertNotIn("auth=reset&token=", auth_router)
+
+    def test_assets_nginx_keeps_security_headers(self):
+        from pathlib import Path
+
+        compose = (
+            Path(__file__).resolve().parents[1]
+            / "deploy"
+            / "nginx"
+            / "web.compose.conf"
+        ).read_text(encoding="utf-8")
+        # Inside /assets/ block, CSP must be re-declared (nginx inheritance quirk).
+        assets = compose.split("location /assets/")[1].split("location /")[0]
+        self.assertIn("Content-Security-Policy", assets)
+        self.assertIn("X-Frame-Options", assets)
+

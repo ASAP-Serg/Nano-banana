@@ -112,8 +112,15 @@ export default function App() {
         })
         .catch(() => toast("Сессия регистрации истекла — войдите снова", "error"));
     } else if (auth === "reset") {
-      const token = params.get("token") || "";
-      cleanAll();
+      // Prefer hash token (not in Referer / access logs); fall back to legacy query once.
+      const hashParams = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
+      const token = hashParams.get("token") || params.get("token") || "";
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      url.searchParams.delete("reason");
+      url.searchParams.delete("token");
+      url.hash = "";
+      window.history.replaceState({}, "", url.pathname + url.search);
       setResetToken(token);
       setShowReset(true);
     } else if (auth === "error") {

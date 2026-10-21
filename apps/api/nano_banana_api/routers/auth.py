@@ -245,8 +245,9 @@ def _verify_link(raw_token: str) -> str:
 
 
 def _reset_link(raw_token: str) -> str:
+    # Token in URL fragment — not sent in Referer to /api and not logged by nginx as query.
     base = _frontend_base().rstrip("/")
-    return f"{base}/?auth=reset&token={raw_token}"
+    return f"{base}/?auth=reset#token={raw_token}"
 
 
 def _verify_totp(user: User, code: Optional[str]) -> bool:

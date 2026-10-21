@@ -84,7 +84,12 @@ class CookieCsrfMiddleware(BaseHTTPMiddleware):
         # Bearer clients are not cookie-CSRF; skip when Authorization present.
         if request.headers.get("authorization"):
             return await call_next(request)
-        if not request.cookies.get("nb_access"):
+        # Any auth-ish cookie makes the request a CSRF target (not only nb_access).
+        if not (
+            request.cookies.get("nb_access")
+            or request.cookies.get("nb_pending_2fa")
+            or request.cookies.get("nb_pending_profile")
+        ):
             return await call_next(request)
         allowed = {o.strip().rstrip("/") for o in CORS_ORIGINS if o.strip() and o.strip() != "*"}
         api_url = (settings.API_URL or "").strip().rstrip("/")
