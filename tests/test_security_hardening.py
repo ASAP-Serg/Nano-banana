@@ -100,7 +100,7 @@ class TestDeleteCleansReferences(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("delete_generation_assets", text)
         self.assertIn("totp_enabled", text)
-        self.assertIn("Для мозаики админу нужна двухфакторная", text)
+        self.assertIn("Для мозаики нужна двухфакторная аутентификация", text)
 
 
 class TestDnsPin(unittest.TestCase):
@@ -522,13 +522,15 @@ class TestMediumHardening(unittest.TestCase):
             / "routers"
             / "auth.py"
         ).read_text(encoding="utf-8")
+        disabled_msg = "Регистрация паролем отключена"
+        self.assertIn(disabled_msg, auth_router)
         self.assertLess(
             auth_router.find("check_rate_limit"),
-            auth_router.find("Регистрация отключена"),
+            auth_router.find(disabled_msg),
         )
         self.assertLess(
             auth_router.find("pg_advisory_xact_lock"),
-            auth_router.find("Регистрация отключена"),
+            auth_router.find(disabled_msg),
         )
 
     def test_nginx_forwards_client_ip_and_k8s_csp(self):
@@ -769,4 +771,62 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
             DeleteAccountRequest(confirm="delete", current_password="x")
         ok = DeleteAccountRequest(confirm="УДАЛИТЬ", current_password="longpassword1")
         self.assertEqual(ok.confirm, "УДАЛИТЬ")
+
+    def test_csrf_middleware_fail_closed(self):
+        from pathlib import Path
+
+        main = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "main.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("CSRF allowlist empty", main)
+        self.assertIn("CSRF origin required", main)
+        self.assertNotIn(
+            'if api_lower.startswith("https://") and "localhost" not in api_lower:\n'
+            '                return JSONResponse(status_code=403, content={"detail": "CSRF origin required"})',
+            main,
+        )
+
+    def test_google_callback_reclaims_unverified_squat(self):
+        from pathlib import Path
+
+        auth_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "auth.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Unverified email squat", auth_router)
+        self.assertIn("user.hashed_password = None", auth_router)
+
+    def test_mosaic_requires_totp_for_all(self):
+        from pathlib import Path
+
+        images = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "images.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Для мозаики нужна двухфакторная аутентификация", images)
+        self.assertNotIn("Для мозаики админу нужна", images)
+
+    def test_mail_html_escaped(self):
+        from pathlib import Path
+
+        mail = (
+            Path(__file__).resolve().parents[1]
+            / "packages"
+            / "core"
+            / "nano_banana"
+            / "mail.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("html.escape", mail)
 

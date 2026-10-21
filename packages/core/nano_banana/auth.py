@@ -148,7 +148,7 @@ class AuthService:
         except HTTPException:
             raise
         except JWTError as e:
-            logger.warning(f"Token decode error: {e}")
+            logger.warning("Token decode error: %s", type(e).__name__)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",

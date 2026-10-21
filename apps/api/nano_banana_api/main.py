@@ -70,7 +70,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 class CookieCsrfMiddleware(BaseHTTPMiddleware):
-    """Block cross-site state changes that rely on nb_access cookie (no Bearer)."""
+    """Block cross-site state changes that rely on nb_access cookie (no Bearer).
+
+    Fail-closed: cookie mutations always need Origin/Referer matching an explicit allowlist.
+    Wildcard CORS is never treated as an allowlist for CSRF.
+    """
 
     _SAFE = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 
@@ -86,6 +90,8 @@ class CookieCsrfMiddleware(BaseHTTPMiddleware):
         api_url = (settings.API_URL or "").strip().rstrip("/")
         if api_url:
             allowed.add(api_url)
+        if not allowed:
+            return JSONResponse(status_code=403, content={"detail": "CSRF allowlist empty"})
         origin = (request.headers.get("origin") or "").strip().rstrip("/")
         referer = (request.headers.get("referer") or "").strip()
         referer_origin = ""
@@ -99,13 +105,10 @@ class CookieCsrfMiddleware(BaseHTTPMiddleware):
             except Exception:
                 referer_origin = ""
         candidate = origin or referer_origin
-        if allowed and candidate and candidate not in allowed:
+        if not candidate:
+            return JSONResponse(status_code=403, content={"detail": "CSRF origin required"})
+        if candidate not in allowed:
             return JSONResponse(status_code=403, content={"detail": "CSRF origin rejected"})
-        if allowed and not candidate:
-            # Cookie session without Origin/Referer on mutating call — reject in prod HTTPS.
-            api_lower = (settings.API_URL or "").lower()
-            if api_lower.startswith("https://") and "localhost" not in api_lower:
-                return JSONResponse(status_code=403, content={"detail": "CSRF origin required"})
         return await call_next(request)
 
 
@@ -123,7 +126,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error("[GLOBAL_ERROR] %s", exc, exc_info=True)
-    save_error_to_file({"type": "unhandled_exception", "path": str(request.url.path), "error": str(exc)})
+    save_error_to_file(
+        {
+            "type": "unhandled_exception",
+            "path": str(request.url.path),
+            "error": type(exc).__name__,
+        }
+    )
     return JSONResponse(status_code=500, content={"detail": "Внутренняя ошибка сервера"})
 
 

@@ -476,7 +476,14 @@ async def logout(request: Request, response: Response):
 
 
 @router.get("/verify-email")
-async def verify_email(token: str, response: Response):
+async def verify_email(token: str, request: Request, response: Response):
+    check_rate_limit(
+        "verify-email",
+        client_ip_from_request(request),
+        30,
+        3600,
+        "Слишком много попыток подтверждения. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         uid = consume_token(session, token, PURPOSE_VERIFY)
         if uid is None:
@@ -675,6 +682,13 @@ async def reset_password(body: ResetPasswordRequest, request: Request, response:
 
 @router.get("/profile/pending")
 async def profile_pending(request: Request):
+    check_rate_limit(
+        "profile-pending",
+        client_ip_from_request(request),
+        60,
+        300,
+        "Слишком много запросов. Попробуйте позже.",
+    )
     data = _read_pending_profile(request.cookies.get(PENDING_PROFILE_COOKIE))
     if not data:
         raise HTTPException(status_code=404, detail="Нет незавершённой регистрации")
@@ -690,6 +704,13 @@ async def profile_complete(
     request: Request,
     response: Response,
 ):
+    check_rate_limit(
+        "profile-complete",
+        client_ip_from_request(request),
+        20,
+        3600,
+        "Слишком много попыток. Попробуйте позже.",
+    )
     data = _read_pending_profile(request.cookies.get(PENDING_PROFILE_COOKIE))
     if not data:
         raise HTTPException(status_code=401, detail="Сессия регистрации истекла — войдите снова")
@@ -720,9 +741,17 @@ async def profile_complete(
 
 @router.delete("/trusted-devices")
 async def revoke_trusted_devices(
+    request: Request,
     response: Response,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
+    check_rate_limit(
+        "revoke-trusted",
+        f"{client_ip_from_request(request)}:{user.user_id}",
+        20,
+        3600,
+        "Слишком много запросов. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         revoke_all_trusted_devices(session, user.user_id)
         session.commit()
@@ -731,7 +760,17 @@ async def revoke_trusted_devices(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]):
+async def get_current_user_info(
+    request: Request,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    check_rate_limit(
+        "auth-me",
+        f"{client_ip_from_request(request)}:{user.user_id}",
+        120,
+        60,
+        "Слишком много запросов. Подождите.",
+    )
     with db_service.get_session() as session:
         db_user = session.query(User).filter(User.id == user.user_id).first()
         if not db_user:
@@ -959,8 +998,24 @@ async def google_callback(
         if not user:
             user = session.query(User).filter(User.email == info["email"]).first()
             if user:
-                user.google_sub = info["sub"]
-                user.email_verified = True
+                existing_sub = getattr(user, "google_sub", None)
+                if existing_sub and existing_sub != info["sub"]:
+                    return _auth_redirect({"auth": "error", "reason": "conflict"})
+                if bool(getattr(user, "email_verified", False)) or existing_sub:
+                    # Verified password account (or already linked) — safe soft-link.
+                    user.google_sub = info["sub"]
+                    user.email_verified = True
+                else:
+                    # Unverified email squat: reclaim for the real Google owner.
+                    # Wipe planted password so the squatter cannot keep logging in.
+                    user.google_sub = info["sub"]
+                    user.email_verified = True
+                    user.hashed_password = None
+                    user.token_version = int(getattr(user, "token_version", 0) or 0) + 1
+                    revoke_all_trusted_devices(session, user.id)
+                    if settings.SECURITY_REQUIRE_ADMIN_APPROVAL and not user.is_admin:
+                        user.is_approved = False
+                    is_new_google_user = True
             else:
                 base_name = username_from_google(info["email"], info.get("name") or "")
                 suggested = unique_username(session, User, base_name)

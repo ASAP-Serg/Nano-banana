@@ -24,7 +24,9 @@ _WEAK_PASSWORDS = {
     "local-dev-redis-password",
 }
 
-_DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+# Only loopback + typical docker bridge. Do not publish the API port to the LAN.
+# Override SECURITY_TRUSTED_PROXY_CIDRS to the exact proxy CIDR if needed.
+_DEFAULT_TRUSTED_PROXY_CIDRS = "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12"
 _PROD_PRESIGN_MAX_SECONDS = 300
 
 

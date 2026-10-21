@@ -124,13 +124,13 @@ async def generate_image(
         select_key_for_model(user.user_id, selected_model)
 
         if body.generation_mode == "mosaic":
-            if user.is_admin and not user.totp_enabled:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Для мозаики админу нужна двухфакторная аутентификация",
-                )
             if not user.is_operator and not user.is_admin:
                 raise HTTPException(status_code=403, detail="Режим мозаики только для операторов")
+            if not user.totp_enabled:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Для мозаики нужна двухфакторная аутентификация",
+                )
             if body.mosaic_kind not in MODE_IMAGE_COUNT:
                 raise HTTPException(status_code=400, detail="Выберите режим мозаики")
             expected = MODE_IMAGE_COUNT[body.mosaic_kind]
@@ -250,6 +250,13 @@ async def list_generations(
     request: Request,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
+    check_rate_limit(
+        "images-list",
+        f"{client_ip_from_request(request)}:{user.user_id}",
+        120,
+        60,
+        "Слишком много запросов к галерее. Подождите.",
+    )
     query_params = request.query_params
     try:
         limit_val = int(query_params.get("limit") or 50)
@@ -461,8 +468,16 @@ async def get_generation_reference(
 @router.get("/{generation_id}")
 async def get_generation_full(
     generation_id: int,
+    http_request: Request,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
+    check_rate_limit(
+        "images-get",
+        f"{client_ip_from_request(http_request)}:{user.user_id}",
+        180,
+        60,
+        "Слишком много запросов. Подождите.",
+    )
     with db_service.get_session() as session:
         generation = session.query(Generation).filter(
             Generation.id == generation_id,
