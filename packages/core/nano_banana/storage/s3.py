@@ -155,8 +155,13 @@ class MinioService:
             return url_or_path
 
     def delete_image(self, filename: str) -> bool:
+        path = self.extract_object_path(filename) or (
+            filename if isinstance(filename, str) and filename.startswith("images/") else None
+        )
+        if not path:
+            return False
         try:
-            self.client.remove_object(self.bucket, filename)
+            self.client.remove_object(self.bucket, path)
             return True
         except S3Error as exc:
             logger.error("[S3] delete failed: %s", exc)

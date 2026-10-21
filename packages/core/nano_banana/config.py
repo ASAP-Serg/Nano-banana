@@ -133,9 +133,9 @@ class Settings(BaseSettings):
     SECURITY_ENABLE_HSTS: bool = True
     SECURITY_LOGIN_MAX_ATTEMPTS: int = 8
     SECURITY_LOGIN_WINDOW_SECONDS: int = 300
-    SECURITY_GENERATE_MAX_REQUESTS: int = 0
+    SECURITY_GENERATE_MAX_REQUESTS: int = 60
     SECURITY_GENERATE_WINDOW_SECONDS: int = 3600
-    SECURITY_GENERATE_IP_MAX_REQUESTS: int = 0
+    SECURITY_GENERATE_IP_MAX_REQUESTS: int = 120
     SECURITY_GENERATE_IP_WINDOW_SECONDS: int = 3600
     SECURITY_ADMIN_READ_MAX_REQUESTS: int = 120
     SECURITY_ADMIN_READ_WINDOW_SECONDS: int = 60
@@ -199,6 +199,10 @@ class Settings(BaseSettings):
                 raise ValueError("REDIS_PASSWORD or password in REDIS_URL is required in production")
             if redis_pw.lower() in _WEAK_PASSWORDS:
                 raise ValueError("REDIS_PASSWORD is weak — set a strong password in .env")
+            if int(self.SECURITY_GENERATE_MAX_REQUESTS) <= 0:
+                raise ValueError("SECURITY_GENERATE_MAX_REQUESTS must be > 0 in production")
+            if int(self.SECURITY_GENERATE_IP_MAX_REQUESTS) <= 0:
+                raise ValueError("SECURITY_GENERATE_IP_MAX_REQUESTS must be > 0 in production")
         return self
 
 

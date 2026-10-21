@@ -21,6 +21,7 @@ class User(Base):
     replicate_api_key = Column(String, nullable=True)  # API ключ пользователя (зашифрован)
     totp_secret = Column(String, nullable=True)  # зашифрованный секрет TOTP
     totp_enabled = Column(Boolean, default=False)
+    token_version = Column(Integer, default=0, nullable=False)  # bump → все JWT этого юзера мертвы
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)

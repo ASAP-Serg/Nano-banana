@@ -77,6 +77,7 @@ class AuthService:
             data={
                 "sub": user_data.username,
                 "user_id": user_data.id,
+                "ver": int(getattr(user_data, "token_version", 0) or 0),
             },
             expires_delta=self.access_token_expire
         )
@@ -104,6 +105,7 @@ class AuthService:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             username = payload.get("sub")
             user_id = payload.get("user_id")
+            token_ver = payload.get("ver")
             if not username or user_id is None:
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -124,6 +126,14 @@ class AuthService:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="Аккаунт пользователя отключен",
+                    )
+                current_ver = int(getattr(db_user, "token_version", 0) or 0)
+                # Старые JWT без ver и токены после смены пароля — недействительны.
+                if token_ver is None or int(token_ver) != current_ver:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Could not validate credentials",
+                        headers={"WWW-Authenticate": "Bearer"},
                     )
                 return TokenPayload(
                     username=db_user.username,

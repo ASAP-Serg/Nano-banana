@@ -16,6 +16,7 @@ from nano_banana.config import settings
 from nano_banana.rate_limit import check_rate_limit
 from nano_banana.mosaic.prompts import MODES, VARIANTS, bundled_prompts, list_prompt_slots
 from nano_banana.schemas import AdminPasswordRequest, MosaicPromptUpdate
+from nano_banana.generation.cleanup import delete_generation_assets
 from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.idle import IDLE_GENERATION_DAYS, is_generation_idle
 from nano_banana.storage.media import client_reference_urls, client_result_url
@@ -426,14 +427,7 @@ def _purge_user_files(session, user_id: int):
     storage = _storage()
     gens = session.query(Generation).filter(Generation.user_id == user_id).all()
     for gen in gens:
-        path = getattr(gen, "result_path", None)
-        if path:
-            storage.delete_image(path)
-        meta = gen.generation_metadata or {}
-        for url in meta.get("reference_image_urls") or []:
-            object_path = storage.extract_object_path(url)
-            if object_path:
-                storage.delete_image(object_path)
+        delete_generation_assets(storage, gen)
 
 
 @router.post("/users/{target_user_id}/deactivate")
@@ -450,6 +444,7 @@ async def admin_deactivate_user(
         _forbid_self(user, target)
         _forbid_last_active_admin(session, target)
         target.is_active = False
+        target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
         _audit_admin_action(
             session=session,
             actor_admin_id=user.user_id,

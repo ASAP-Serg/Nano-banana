@@ -12,7 +12,7 @@ from nano_banana.auth import auth_service
 from nano_banana.config import settings
 from nano_banana.db.models import Generation, MosaicPrompt, User
 from nano_banana.db.session import db_service
-from nano_banana.generation.cleanup import cleanup_old_generations
+from nano_banana.generation.cleanup import cleanup_old_generations, delete_generation_assets
 from nano_banana.generation.keys import load_user_api_keys, select_key_for_model
 from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.generation.processor import MAX_GENERATION_RETRIES, get_fallback_model, rewrite_metadata_fields
@@ -117,6 +117,11 @@ async def generate_image(
         select_key_for_model(user.user_id, selected_model)
 
         if body.generation_mode == "mosaic":
+            if user.is_admin and not user.totp_enabled:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Для мозаики админу нужна двухфакторная аутентификация",
+                )
             if not user.is_operator and not user.is_admin:
                 raise HTTPException(status_code=403, detail="Режим мозаики только для операторов")
             if body.mosaic_kind not in MODE_IMAGE_COUNT:
@@ -490,8 +495,7 @@ async def delete_generation(
         ).first()
         if not generation:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
-        if generation.result_path:
-            _storage().delete_image(generation.result_path)
+        delete_generation_assets(_storage(), generation)
         session.delete(generation)
         session.commit()
         return {"message": "Генерация удалена"}

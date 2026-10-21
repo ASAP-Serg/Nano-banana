@@ -18,11 +18,34 @@ RETENTION_DAYS = 7
 def _extract_storage_path(url: str, bucket: str) -> Optional[str]:
     if not url:
         return None
+    if url.startswith("images/"):
+        path = url.split("?", 1)[0]
+        if ".." in path or path.startswith("/") or "\\" in path:
+            return None
+        return path
     marker = f"/{bucket}/"
     idx = url.find(marker)
     if idx == -1:
         return None
     return url[idx + len(marker) :]
+
+
+def delete_generation_assets(minio: MinioService, generation: Generation) -> list[str]:
+    """Удаляет result + reference objects этой генерации из MinIO. Возвращает удалённые пути."""
+    deleted: List[str] = []
+    result = getattr(generation, "result_path", None) or getattr(generation, "result_url", None)
+    if result:
+        path = minio.extract_object_path(result) or _extract_storage_path(str(result), settings.MINIO_BUCKET)
+        if path and minio.delete_image(path):
+            deleted.append(path)
+    meta = generation.generation_metadata or {}
+    for url in meta.get("reference_image_urls") or []:
+        if not url:
+            continue
+        path = minio.extract_object_path(url) or _extract_storage_path(str(url), settings.MINIO_BUCKET)
+        if path and minio.delete_image(path):
+            deleted.append(path)
+    return deleted
 
 
 def cleanup_old_generations(minio: MinioService, retention_days: int = RETENTION_DAYS) -> dict:
@@ -34,30 +57,7 @@ def cleanup_old_generations(minio: MinioService, retention_days: int = RETENTION
             session.query(Generation).filter(Generation.created_at < cutoff).all()
         )
         for gen in old_generations:
-            if gen.result_path and minio.delete_image(gen.result_path):
-                deleted_files.append(gen.result_path)
-            if gen.generation_metadata:
-                ref_urls = gen.generation_metadata.get("reference_image_urls") or []
-                for url in ref_urls:
-                    if not url:
-                        continue
-                    other_gens = (
-                        session.query(Generation)
-                        .filter(Generation.id != gen.id)
-                        .filter(Generation.generation_metadata.isnot(None))
-                        .all()
-                    )
-                    used = False
-                    for other in other_gens:
-                        other_urls = (other.generation_metadata or {}).get("reference_image_urls") or []
-                        if url in other_urls:
-                            used = True
-                            break
-                    if used:
-                        continue
-                    path = _extract_storage_path(url, settings.MINIO_BUCKET)
-                    if path and minio.delete_image(path):
-                        deleted_files.append(path)
+            deleted_files.extend(delete_generation_assets(minio, gen))
             session.delete(gen)
             deleted_count += 1
     logger.info("[CLEANUP] deleted generations=%s files=%s", deleted_count, len(deleted_files))

@@ -4,7 +4,7 @@ from typing import Annotated, Optional
 
 import pyotp
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
-from sqlalchemy import or_
+from sqlalchemy import or_, text
 from sqlalchemy.exc import IntegrityError
 
 from nano_banana.auth import auth_service
@@ -30,6 +30,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 COOKIE_NAME = "nb_access"
 COOKIE_PATH = "/api"
 _LOGIN_FAIL = "Неверное имя пользователя/email или пароль"
+# pg_advisory_xact_lock key — сериализует bootstrap первого админа
+_BOOTSTRAP_LOCK_KEY = 742901001
 
 
 def _cookie_secure() -> bool:
@@ -90,20 +92,18 @@ async def register(
         settings.SECURITY_REGISTER_WINDOW_SECONDS,
         "Слишком много попыток регистрации с этого адреса. Попробуйте позже.",
     )
-    with db_service.get_session() as session:
-        users_count = session.query(User).count()
-
     bootstrap_ok = _bootstrap_secret_ok(x_admin_bootstrap_secret)
-    if not settings.SECURITY_ALLOW_PUBLIC_REGISTER:
-        if not (bootstrap_ok and users_count == 0):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Регистрация отключена. Обратитесь к администратору.",
-            )
-
     hashed_password = auth_service.get_password_hash(user_data.password)
     with db_service.get_session() as session:
+        # Один advisory lock на транзакцию — два параллельных bootstrap не станут оба админами.
+        session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _BOOTSTRAP_LOCK_KEY})
         users_count = session.query(User).count()
+        if not settings.SECURITY_ALLOW_PUBLIC_REGISTER:
+            if not (bootstrap_ok and users_count == 0):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Регистрация отключена. Обратитесь к администратору.",
+                )
         existing_user = session.query(User).filter(
             or_(User.username == user_data.username, User.email == user_data.email)
         ).first()
@@ -119,6 +119,7 @@ async def register(
             hashed_password=hashed_password,
             is_active=True,
             is_admin=make_admin,
+            token_version=0,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
             last_login=datetime.utcnow(),
@@ -199,6 +200,7 @@ async def get_current_user_info(user: Annotated[TokenPayload, Depends(auth_servi
 @router.post("/password")
 async def change_password(
     body: PasswordChangeRequest,
+    response: Response,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     check_rate_limit(
@@ -213,7 +215,11 @@ async def change_password(
         if not db_user or not auth_service.verify_password(body.current_password, db_user.hashed_password):
             raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
         db_user.hashed_password = auth_service.get_password_hash(body.new_password)
+        db_user.token_version = int(getattr(db_user, "token_version", 0) or 0) + 1
         session.commit()
+        session.refresh(db_user)
+        access = await auth_service.create_access_token(db_user)
+        _set_access_cookie(response, access)
     return {"ok": True}
 
 

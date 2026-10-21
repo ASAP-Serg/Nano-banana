@@ -20,6 +20,9 @@ from nano_banana.storage.s3 import MinioService
 logger = logging.getLogger(__name__)
 
 MAX_DIMENSION_VALIDATION = 8192
+# Pillow decompression bomb guard (~67MP); меньше чем дефолт Pillow, достаточно для рефов.
+MAX_IMAGE_PIXELS = 64_000_000
+PILImage.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 MAX_REF_SIZE = 20 * 1024 * 1024
 MAX_REF_DATA_URL_CHARS = int(MAX_REF_SIZE * 4 / 3) + 128
 ALLOWED_REF_MIMES = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
@@ -135,11 +138,16 @@ def store_reference_images(
                 img = PILImage.open(io.BytesIO(image_bytes))
                 img.verify()
                 img = PILImage.open(io.BytesIO(image_bytes))
+                pixels = int(img.width or 0) * int(img.height or 0)
+                if pixels > MAX_IMAGE_PIXELS:
+                    raise ValueError(f"Референс {idx + 1}: слишком много пикселей")
                 if img.width > MAX_DIMENSION_VALIDATION or img.height > MAX_DIMENSION_VALIDATION:
                     raise ValueError(
                         f"Референс {idx + 1} слишком большой ({img.width}x{img.height}). "
                         f"Максимальный размер: {MAX_DIMENSION_VALIDATION}x{MAX_DIMENSION_VALIDATION}"
                     )
+            except PILImage.DecompressionBombError as bomb:
+                raise ValueError(f"Референс {idx + 1}: изображение отклонено (decompression bomb)") from bomb
             except ValueError:
                 raise
             except Exception as img_error:

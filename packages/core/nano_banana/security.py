@@ -110,6 +110,40 @@ def _hostname_resolves_to_private(hostname: str) -> bool:
     return False
 
 
+def resolve_public_ip(hostname: str) -> str:
+    """
+    Резолвит hostname и возвращает первый публичный IP.
+    Любой private/loopback в ответе DNS → отказ (защита от DNS rebinding).
+    """
+    host = (hostname or "").strip().rstrip(".")
+    if not host:
+        raise ValueError("empty hostname")
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        if _is_private_ip(literal):
+            raise ValueError("private IP blocked")
+        return str(literal)
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("DNS resolution failed") from exc
+    public: list[str] = []
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _is_private_ip(ip):
+            raise ValueError("hostname resolves to private IP")
+        public.append(str(ip))
+    if not public:
+        raise ValueError("no public addresses")
+    return public[0]
+
+
 def _outbound_host_allowed(hostname: str, settings: "Settings") -> bool:
     host = (hostname or "").lower().rstrip(".")
     if not host:

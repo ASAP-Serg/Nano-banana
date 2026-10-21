@@ -44,6 +44,88 @@ class TestBootstrapCompare(unittest.TestCase):
         self.assertFalse(constant_time_secret_equal("abc-secret", None))
 
 
+class TestBootstrapLockAndTokenVersion(unittest.TestCase):
+    def test_register_uses_advisory_lock(self):
+        from pathlib import Path
+
+        auth_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "auth.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("pg_advisory_xact_lock", auth_router)
+        self.assertIn("token_version", auth_router)
+
+    def test_jwt_embeds_and_checks_token_version(self):
+        from pathlib import Path
+
+        auth_core = (
+            Path(__file__).resolve().parents[1] / "packages" / "core" / "nano_banana" / "auth.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"ver":', auth_core)
+        self.assertIn("token_version", auth_core)
+        self.assertIn("token_ver", auth_core)
+
+    def test_prod_rejects_unlimited_generate(self):
+        from nano_banana.config import Settings
+
+        with self.assertRaises(Exception):
+            Settings(
+                SECRET_KEY="x" * 64,
+                POSTGRES_PASSWORD="test-strong-postgres-password",
+                MINIO_ACCESS_KEY="testminioaccess12",
+                MINIO_SECRET_KEY="test-strong-minio-secret-key",
+                API_URL="https://app.example.com",
+                DATA_ENCRYPTION_KEY="y" * 64,
+                REDIS_PASSWORD="test-redis-password-not-weak-xx",
+                SECURITY_GENERATE_MAX_REQUESTS=0,
+                SECURITY_GENERATE_IP_MAX_REQUESTS=120,
+            )
+
+
+class TestDeleteCleansReferences(unittest.TestCase):
+    def test_delete_router_calls_asset_cleanup(self):
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "images.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("delete_generation_assets", text)
+        self.assertIn("totp_enabled", text)
+        self.assertIn("Для мозаики админу нужна двухфакторная", text)
+
+
+class TestDnsPin(unittest.TestCase):
+    def test_resolve_public_ip_blocks_loopback(self):
+        from nano_banana.security import resolve_public_ip
+
+        with self.assertRaises(ValueError):
+            resolve_public_ip("127.0.0.1")
+
+    def test_download_uses_pinned_request(self):
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[1]
+            / "packages"
+            / "core"
+            / "nano_banana"
+            / "storage"
+            / "results.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("resolve_public_ip", text)
+        self.assertIn("_pinned_request", text)
+        self.assertNotIn("requests.Session", text)
+
+
 class TestPresignTtl(unittest.TestCase):
     def test_prod_clamps_to_300(self):
         from nano_banana.config import Settings
@@ -439,6 +521,10 @@ class TestMediumHardening(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertLess(
             auth_router.find("check_rate_limit"),
+            auth_router.find("Регистрация отключена"),
+        )
+        self.assertLess(
+            auth_router.find("pg_advisory_xact_lock"),
             auth_router.find("Регистрация отключена"),
         )
 
