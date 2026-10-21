@@ -1,7 +1,9 @@
-"""Who may run sensitive actions (generate, etc.)."""
+"""Who may run sensitive actions (generate, API keys, etc.)."""
 from __future__ import annotations
 
 from typing import Optional, Tuple
+
+from fastapi import HTTPException
 
 from nano_banana.config import settings
 
@@ -26,6 +28,8 @@ def approval_ok_for_generate(user) -> bool:
 
 def generate_block_reason(user) -> Optional[str]:
     """Return human-readable block reason, or None if allowed."""
+    if not bool(getattr(user, "is_active", True)):
+        return "Аккаунт отключён."
     if not email_ok_for_generate(user):
         return "Подтвердите email, прежде чем запускать генерации."
     if not approval_ok_for_generate(user):
@@ -35,3 +39,10 @@ def generate_block_reason(user) -> Optional[str]:
 
 def access_flags(user) -> Tuple[bool, bool]:
     return email_ok_for_generate(user), approval_ok_for_generate(user)
+
+
+def require_sensitive_access(user) -> None:
+    """Raise 403 unless user may use generate / store provider API keys."""
+    reason = generate_block_reason(user)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)

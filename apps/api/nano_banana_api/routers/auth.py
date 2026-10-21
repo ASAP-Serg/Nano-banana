@@ -519,10 +519,18 @@ async def resend_verification(body: ResendVerifyRequest, request: Request):
 @router.post("/email", response_model=UserResponse)
 async def update_email(
     body: UpdateEmailRequest,
+    request: Request,
     response: Response,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     """Set or change email; sends verification link. Required for legacy accounts."""
+    check_rate_limit(
+        "update-email",
+        f"{client_ip_from_request(request)}:{user.user_id}",
+        settings.SECURITY_ACCOUNT_MAX_ATTEMPTS,
+        settings.SECURITY_ACCOUNT_WINDOW_SECONDS,
+        "Слишком много смен email. Попробуйте позже.",
+    )
     email_norm = str(body.email).strip().lower()
     with db_service.get_session() as session:
         db_user = session.query(User).filter(User.id == user.user_id).first()
@@ -533,6 +541,8 @@ async def update_email(
                 body.current_password, db_user.hashed_password
             ):
                 raise HTTPException(status_code=401, detail="Неверный пароль")
+        elif not getattr(db_user, "google_sub", None):
+            raise HTTPException(status_code=400, detail="Нельзя сменить email для этого аккаунта")
         taken = (
             session.query(User)
             .filter(User.email == email_norm, User.id != db_user.id)
@@ -557,9 +567,17 @@ async def update_email(
 @router.delete("/me")
 async def delete_my_account(
     body: DeleteAccountRequest,
+    request: Request,
     response: Response,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
+    check_rate_limit(
+        "delete-me",
+        f"{client_ip_from_request(request)}:{user.user_id}",
+        5,
+        settings.SECURITY_ACCOUNT_WINDOW_SECONDS,
+        "Слишком много попыток удаления. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         db_user = session.query(User).filter(User.id == user.user_id).first()
         if not db_user:
@@ -580,12 +598,9 @@ async def delete_my_account(
                 body.current_password, db_user.hashed_password
             ):
                 raise HTTPException(status_code=401, detail="Неверный пароль")
-        else:
-            if (body.confirm or "").strip() != db_user.username:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Для удаления введите своё имя пользователя в поле подтверждения",
-                )
+        elif not getattr(db_user, "google_sub", None):
+            raise HTTPException(status_code=400, detail="Нельзя удалить этот аккаунт так")
+        # body.confirm already validated as УДАЛИТЬ by schema
         uid = db_user.id
         username = db_user.username
         storage = MinioService()
@@ -631,7 +646,14 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request):
 
 
 @router.post("/reset-password")
-async def reset_password(body: ResetPasswordRequest, response: Response):
+async def reset_password(body: ResetPasswordRequest, request: Request, response: Response):
+    check_rate_limit(
+        "reset-password",
+        client_ip_from_request(request),
+        10,
+        3600,
+        "Слишком много попыток сброса пароля. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         uid = consume_token(session, body.token, PURPOSE_RESET)
         if uid is None:

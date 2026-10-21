@@ -90,13 +90,12 @@ async def generate_image(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     with db_service.get_session() as _sess:
-        from nano_banana.access import generate_block_reason
+        from nano_banana.access import require_sensitive_access
 
         _u = _sess.query(User).filter(User.id == user.user_id).first()
-        if _u:
-            reason = generate_block_reason(_u)
-            if reason:
-                raise HTTPException(status_code=403, detail=reason)
+        if not _u or not _u.is_active:
+            raise HTTPException(status_code=403, detail="Аккаунт отключён.")
+        require_sensitive_access(_u)
     check_rate_limit(
         "generate-user",
         str(user.user_id),
@@ -376,6 +375,13 @@ async def get_provider_status(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
     model_name: Optional[str] = None,
 ):
+    with db_service.get_session() as session:
+        from nano_banana.access import require_sensitive_access
+
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user or not db_user.is_active:
+            raise HTTPException(status_code=403, detail="Аккаунт отключён.")
+        require_sensitive_access(db_user)
     return build_provider_status(user.user_id, model_name)
 
 
@@ -494,8 +500,16 @@ async def get_generation_full(
 @router.delete("/{generation_id}")
 async def delete_generation(
     generation_id: int,
+    http_request: Request,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
+    check_rate_limit(
+        "gen-delete",
+        f"{client_ip_from_request(http_request)}:{user.user_id}",
+        60,
+        3600,
+        "Слишком много удалений. Подождите.",
+    )
     with db_service.get_session() as session:
         generation = session.query(Generation).filter(
             Generation.id == generation_id,

@@ -9,7 +9,7 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
   const [username, setUsername] = useState(user?.username || "");
   const [email, setEmail] = useState(user?.email || "");
   const [deletePassword, setDeletePassword] = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState("");
+  const [deletePhrase, setDeletePhrase] = useState("");
   const [busy, setBusy] = useState(false);
   const hasPassword = user?.has_password !== false;
   const emailOk = Boolean(user?.email_verified) || Boolean(user?.google_linked);
@@ -77,11 +77,10 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
     if (!window.confirm("Удалить аккаунт навсегда? Генерации и файлы тоже будут удалены.")) return;
     setBusy(true);
     try {
-      await api.deleteAccount(
-        hasPassword
-          ? { current_password: deletePassword, confirm: "" }
-          : { current_password: "", confirm: deleteConfirm.trim() }
-      );
+      await api.deleteAccount({
+        current_password: hasPassword ? deletePassword : "",
+        confirm: deletePhrase.trim(),
+      });
       toast("Аккаунт удалён");
       onDeleted?.();
       onClose();
@@ -200,7 +199,7 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
         <h6 className="text-danger">Удалить аккаунт</h6>
         <p className="small text-muted">Безвозвратно: профиль, генерации и файлы.</p>
         <form onSubmit={deleteAccount}>
-          {hasPassword ? (
+          {hasPassword && (
             <input
               className="form-control mb-2"
               type="password"
@@ -210,15 +209,15 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
               onChange={(e) => setDeletePassword(e.target.value)}
               required
             />
-          ) : (
-            <input
-              className="form-control mb-2"
-              placeholder={`Введите имя «${user?.username || ""}» для подтверждения`}
-              value={deleteConfirm}
-              onChange={(e) => setDeleteConfirm(e.target.value)}
-              required
-            />
           )}
+          <input
+            className="form-control mb-2"
+            placeholder='Введите слово УДАЛИТЬ'
+            value={deletePhrase}
+            onChange={(e) => setDeletePhrase(e.target.value)}
+            required
+            autoComplete="off"
+          />
           <button type="submit" className="btn btn-danger btn-sm" disabled={busy}>
             Удалить навсегда
           </button>

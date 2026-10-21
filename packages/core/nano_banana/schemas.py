@@ -106,10 +106,18 @@ class UpdateEmailRequest(BaseModel):
 
 
 class DeleteAccountRequest(BaseModel):
-    """Self-delete. Password users must send current_password; Google-only — confirm=username."""
+    """Self-delete. Always requires confirm=УДАЛИТЬ; password users also need current_password."""
 
     current_password: str = ""
     confirm: str = ""
+
+    @field_validator("confirm")
+    @classmethod
+    def validate_delete_confirm(cls, v: str) -> str:
+        text = (v or "").strip()
+        if text != "УДАЛИТЬ":
+            raise ValueError("Для удаления введите слово УДАЛИТЬ")
+        return text
 
 
 class ForgotPasswordRequest(BaseModel):

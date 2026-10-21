@@ -719,15 +719,54 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
 
     def test_access_helper_blocks_unapproved(self):
         from types import SimpleNamespace
-        from nano_banana.access import generate_block_reason
+        from fastapi import HTTPException
+        from nano_banana.access import generate_block_reason, require_sensitive_access
 
         u = SimpleNamespace(
             is_admin=False,
             google_sub=None,
             email_verified=True,
             is_approved=False,
+            is_active=True,
         )
         reason = generate_block_reason(u)
         self.assertIsNotNone(reason)
         self.assertIn("администратор", reason.lower())
+        with self.assertRaises(HTTPException) as ctx:
+            require_sensitive_access(u)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_api_key_route_requires_sensitive_access(self):
+        from pathlib import Path
+
+        users_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "users.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("require_sensitive_access", users_router)
+
+    def test_email_token_consume_uses_row_lock(self):
+        from pathlib import Path
+
+        text = (
+            Path(__file__).resolve().parents[1]
+            / "packages"
+            / "core"
+            / "nano_banana"
+            / "email_tokens.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("with_for_update", text)
+
+    def test_delete_account_requires_phrase(self):
+        from nano_banana.schemas import DeleteAccountRequest
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            DeleteAccountRequest(confirm="delete", current_password="x")
+        ok = DeleteAccountRequest(confirm="УДАЛИТЬ", current_password="longpassword1")
+        self.assertEqual(ok.confirm, "УДАЛИТЬ")
 

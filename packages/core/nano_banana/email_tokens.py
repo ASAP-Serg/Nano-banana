@@ -40,6 +40,7 @@ def issue_token(session, user_id: int, purpose: str, *, hours: int) -> str:
 
 
 def consume_token(session, raw: str, purpose: str) -> Optional[int]:
+    """Atomically consume a one-time token (row lock + used_at)."""
     if not raw or not str(raw).strip():
         return None
     now = datetime.utcnow()
@@ -51,9 +52,14 @@ def consume_token(session, raw: str, purpose: str) -> Optional[int]:
             AuthEmailToken.used_at.is_(None),
             AuthEmailToken.expires_at > now,
         )
+        .with_for_update()
         .first()
     )
     if not row:
         return None
+    # Second guard against races across backends that ignore FOR UPDATE.
+    if row.used_at is not None:
+        return None
     row.used_at = now
+    session.flush()
     return int(row.user_id)
