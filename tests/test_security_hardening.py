@@ -672,7 +672,8 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         root = Path(__file__).resolve().parents[1] / "apps" / "web" / "src"
         modals = (root / "components" / "AuthModals.jsx").read_text(encoding="utf-8")
         api = (root / "api.js").read_text(encoding="utf-8")
-        self.assertIn("Запомнить это устройство", modals)
+        self.assertIn("Продолжить с Google", modals)
+        self.assertIn("Продолжить с email", modals)
         self.assertIn("googleStartUrl", api)
         self.assertIn("totpComplete", api)
         self.assertIn("revokeTrustedDevices", api)

@@ -25,6 +25,7 @@ export default function App() {
   const [showTotp, setShowTotp] = useState(false);
   const [showTotpComplete, setShowTotpComplete] = useState(false);
   const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [passwordRegister, setPasswordRegister] = useState(false);
   const [trustedDeviceDays, setTrustedDeviceDays] = useState(30);
   const [status, setStatus] = useState(null);
   const [models, setModels] = useState({});
@@ -51,9 +52,13 @@ export default function App() {
       .providers()
       .then((p) => {
         setGoogleEnabled(Boolean(p?.google));
+        setPasswordRegister(Boolean(p?.password_register));
         if (p?.trusted_device_days) setTrustedDeviceDays(Number(p.trusted_device_days) || 30);
       })
-      .catch(() => setGoogleEnabled(false));
+      .catch(() => {
+        setGoogleEnabled(false);
+        setPasswordRegister(false);
+      });
   }, []);
 
   const loadMe = useCallback(async () => {
@@ -366,10 +371,15 @@ export default function App() {
           setShowLogin(false);
           setShowRegister(true);
         }}
+        onOpenLogin={() => {
+          setShowRegister(false);
+          setShowLogin(true);
+        }}
         onLogin={onLogin}
         onRegister={onRegister}
         onTotpComplete={onTotpComplete}
         googleEnabled={googleEnabled}
+        passwordRegister={passwordRegister}
         trustedDeviceDays={trustedDeviceDays}
       />
       {showTotp && user?.is_admin && !user.totp_enabled && (

@@ -40,7 +40,7 @@ export default function Navbar({
               </label>
             </div>
             {!user ? (
-              <button className="btn btn-outline-light" onClick={onLogin}>
+              <button className="btn btn-light" onClick={onLogin}>
                 Войти
               </button>
             ) : (
