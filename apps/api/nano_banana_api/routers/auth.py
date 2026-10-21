@@ -280,11 +280,16 @@ async def _finish_login(
 @router.get("/providers")
 async def auth_providers():
     public_reg = bool(settings.SECURITY_ALLOW_PUBLIC_REGISTER)
+    mail_ok = mail_configured()
+    # Не показываем форму email-регистрации, пока Resend не настроен (иначе 503).
+    password_register = public_reg and (
+        mail_ok or not bool(settings.SECURITY_REQUIRE_EMAIL_VERIFY)
+    )
     return {
         "google": google_oauth_configured(),
-        "password_register": public_reg,
-        "mail": mail_configured(),
-        "email_verify_required": bool(settings.SECURITY_REQUIRE_EMAIL_VERIFY) and mail_configured(),
+        "password_register": password_register,
+        "mail": mail_ok,
+        "email_verify_required": bool(settings.SECURITY_REQUIRE_EMAIL_VERIFY) and mail_ok,
         "trusted_device_days": int(settings.SECURITY_TRUSTED_DEVICE_DAYS),
     }
 
