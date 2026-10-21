@@ -1,9 +1,14 @@
-"""Роутер аутентификации."""
-from datetime import datetime
+"""Роутер аутентификации: пароль, TOTP, trusted device, Google OAuth."""
+from __future__ import annotations
+
+from datetime import datetime, timedelta
 from typing import Annotated, Optional
+from urllib.parse import urlencode
 
 import pyotp
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
+from jose import JWTError, jwt
 from sqlalchemy import or_, text
 from sqlalchemy.exc import IntegrityError
 
@@ -12,9 +17,20 @@ from nano_banana.config import settings
 from nano_banana.crypto import CryptoService
 from nano_banana.db.models import User
 from nano_banana.db.session import db_service
+from nano_banana.google_oauth import (
+    OAUTH_STATE_COOKIE,
+    PENDING_2FA_COOKIE,
+    build_authorize_url,
+    exchange_code_for_userinfo,
+    google_oauth_configured,
+    new_oauth_state,
+    unique_username,
+    username_from_google,
+)
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
 from nano_banana.schemas import (
     PasswordChangeRequest,
+    TotpCompleteRequest,
     TotpConfirmRequest,
     UsernameChangeRequest,
     UserCreateRequest,
@@ -24,18 +40,29 @@ from nano_banana.schemas import (
 from nano_banana.security import constant_time_secret_equal
 from nano_banana.tokens import Token, TokenPayload
 from nano_banana.totp_qr import otpauth_qr_data_url
+from nano_banana.trusted_device import (
+    COOKIE_PATH,
+    TRUSTED_COOKIE,
+    find_valid_trusted_device,
+    issue_trusted_device,
+    revoke_all_trusted_devices,
+    revoke_trusted_device_by_token,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 COOKIE_NAME = "nb_access"
-COOKIE_PATH = "/api"
 _LOGIN_FAIL = "Неверное имя пользователя/email или пароль"
-# pg_advisory_xact_lock key — сериализует bootstrap первого админа
 _BOOTSTRAP_LOCK_KEY = 742901001
+_PENDING_2FA_MINUTES = 5
 
 
 def _cookie_secure() -> bool:
     return (settings.API_URL or "").lower().startswith("https://")
+
+
+def _frontend_base() -> str:
+    return (settings.API_URL or "").rstrip("/") or ""
 
 
 def _set_access_cookie(response: Response, token: str) -> None:
@@ -61,6 +88,69 @@ def _clear_access_cookie(response: Response) -> None:
         )
 
 
+def _set_trusted_cookie(response: Response, raw: str, max_age: int) -> None:
+    response.set_cookie(
+        key=TRUSTED_COOKIE,
+        value=raw,
+        max_age=max_age,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="strict",
+        path=COOKIE_PATH,
+    )
+
+
+def _clear_trusted_cookie(response: Response) -> None:
+    for path in (COOKIE_PATH, "/"):
+        response.delete_cookie(
+            key=TRUSTED_COOKIE,
+            path=path,
+            samesite="strict",
+            secure=_cookie_secure(),
+        )
+
+
+def _set_pending_2fa_cookie(response: Response, user_id: int) -> None:
+    expire = datetime.utcnow() + timedelta(minutes=_PENDING_2FA_MINUTES)
+    token = jwt.encode(
+        {"uid": user_id, "purpose": "pending_2fa", "exp": expire},
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+    response.set_cookie(
+        key=PENDING_2FA_COOKIE,
+        value=token,
+        max_age=_PENDING_2FA_MINUTES * 60,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        path=COOKIE_PATH,
+    )
+
+
+def _clear_pending_2fa_cookie(response: Response) -> None:
+    for path in (COOKIE_PATH, "/"):
+        response.delete_cookie(
+            key=PENDING_2FA_COOKIE,
+            path=path,
+            samesite="lax",
+            secure=_cookie_secure(),
+        )
+
+
+def _read_pending_2fa_user_id(raw: Optional[str]) -> Optional[int]:
+    if not raw:
+        return None
+    try:
+        payload = jwt.decode(raw, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        if payload.get("purpose") != "pending_2fa":
+            return None
+        uid = payload.get("uid")
+        return int(uid) if uid is not None else None
+    except (JWTError, TypeError, ValueError):
+        return None
+
+
 def _bootstrap_secret_ok(header_secret: Optional[str]) -> bool:
     return constant_time_secret_equal(settings.ADMIN_BOOTSTRAP_SECRET, header_secret)
 
@@ -74,8 +164,52 @@ def _user_response(db_user: User) -> UserResponse:
         is_admin=bool(db_user.is_admin),
         is_operator=bool(getattr(db_user, "is_operator", False)),
         totp_enabled=bool(getattr(db_user, "totp_enabled", False)),
+        has_password=bool(db_user.hashed_password),
+        google_linked=bool(getattr(db_user, "google_sub", None)),
         created_at=db_user.created_at,
     )
+
+
+def _verify_totp(user: User, code: Optional[str]) -> bool:
+    secret = CryptoService.decrypt(user.totp_secret or "")
+    return bool(secret) and bool(code) and pyotp.TOTP(secret).verify(code, valid_window=1)
+
+
+def _ua_label(request: Request) -> str:
+    return ((request.headers.get("user-agent") or "")[:120]) or None
+
+
+async def _finish_login(
+    response: Response,
+    session,
+    user: User,
+    request: Request,
+    *,
+    remember_device: bool,
+    totp_just_ok: bool,
+) -> Token:
+    user.last_login = datetime.utcnow()
+    if remember_device and totp_just_ok and getattr(user, "totp_enabled", False):
+        raw, max_age = issue_trusted_device(session, user.id, label=_ua_label(request))
+        session.commit()
+        session.refresh(user)
+        _set_trusted_cookie(response, raw, max_age)
+    else:
+        session.commit()
+        session.refresh(user)
+    access = await auth_service.create_access_token(user)
+    _set_access_cookie(response, access)
+    _clear_pending_2fa_cookie(response)
+    return Token(access_token="", refresh_token="", token_type="cookie")
+
+
+@router.get("/providers")
+async def auth_providers():
+    return {
+        "google": google_oauth_configured(),
+        "password_register": bool(settings.SECURITY_ALLOW_PUBLIC_REGISTER),
+        "trusted_device_days": int(settings.SECURITY_TRUSTED_DEVICE_DAYS),
+    }
 
 
 @router.post("/register", response_model=Token)
@@ -95,14 +229,13 @@ async def register(
     bootstrap_ok = _bootstrap_secret_ok(x_admin_bootstrap_secret)
     hashed_password = auth_service.get_password_hash(user_data.password)
     with db_service.get_session() as session:
-        # Один advisory lock на транзакцию — два параллельных bootstrap не станут оба админами.
         session.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _BOOTSTRAP_LOCK_KEY})
         users_count = session.query(User).count()
         if not settings.SECURITY_ALLOW_PUBLIC_REGISTER:
             if not (bootstrap_ok and users_count == 0):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Регистрация отключена. Обратитесь к администратору.",
+                    detail="Регистрация отключена. Войдите через Google или обратитесь к администратору.",
                 )
         existing_user = session.query(User).filter(
             or_(User.username == user_data.username, User.email == user_data.email)
@@ -120,6 +253,7 @@ async def register(
             is_active=True,
             is_admin=make_admin,
             token_version=0,
+            email_verified=False,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
             last_login=datetime.utcnow(),
@@ -164,28 +298,65 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
                 User.email == user_data.username_or_email,
             )
         ).first()
-        hashed = user.hashed_password if user else auth_service.DUMMY_PASSWORD_HASH
+        hashed = (
+            user.hashed_password
+            if user and user.hashed_password
+            else auth_service.DUMMY_PASSWORD_HASH
+        )
         password_ok = auth_service.verify_password(user_data.password, hashed)
-        if not user or not password_ok or not user.is_active:
+        if not user or not user.hashed_password or not password_ok or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
+
+        totp_just_ok = False
         if getattr(user, "totp_enabled", False):
-            secret = CryptoService.decrypt(user.totp_secret or "")
-            totp_ok = bool(secret) and bool(user_data.totp_code) and pyotp.TOTP(secret).verify(
-                user_data.totp_code, valid_window=1
+            trusted = find_valid_trusted_device(
+                session, user.id, request.cookies.get(TRUSTED_COOKIE)
             )
-            if not totp_ok:
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
-        user.last_login = datetime.utcnow()
-        session.commit()
-        access = await auth_service.create_access_token(user)
-        _set_access_cookie(response, access)
-        return Token(access_token="", refresh_token="", token_type="cookie")
+            if trusted:
+                session.commit()
+            else:
+                if not _verify_totp(user, user_data.totp_code):
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
+                totp_just_ok = True
+
+        return await _finish_login(
+            response,
+            session,
+            user,
+            request,
+            remember_device=bool(user_data.remember_device),
+            totp_just_ok=totp_just_ok,
+        )
 
 
 @router.post("/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    raw_trusted = request.cookies.get(TRUSTED_COOKIE)
+    access = request.cookies.get(COOKIE_NAME)
+    if access and raw_trusted:
+        try:
+            payload = await auth_service._user_from_token(access)
+            with db_service.get_session() as session:
+                revoke_trusted_device_by_token(session, payload.user_id, raw_trusted)
+                session.commit()
+        except Exception:
+            pass
     _clear_access_cookie(response)
+    _clear_trusted_cookie(response)
+    _clear_pending_2fa_cookie(response)
     return {"ok": True}
+
+
+@router.delete("/trusted-devices")
+async def revoke_trusted_devices(
+    response: Response,
+    user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+):
+    with db_service.get_session() as session:
+        revoke_all_trusted_devices(session, user.user_id)
+        session.commit()
+    _clear_trusted_cookie(response)
+    return {"ok": True, "revoked": True}
 
 
 @router.get("/me", response_model=UserResponse)
@@ -212,14 +383,18 @@ async def change_password(
     )
     with db_service.get_session() as session:
         db_user = session.query(User).filter(User.id == user.user_id).first()
-        if not db_user or not auth_service.verify_password(body.current_password, db_user.hashed_password):
+        if not db_user or not db_user.hashed_password:
+            raise HTTPException(status_code=400, detail="У аккаунта нет пароля — вход через Google")
+        if not auth_service.verify_password(body.current_password, db_user.hashed_password):
             raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
         db_user.hashed_password = auth_service.get_password_hash(body.new_password)
         db_user.token_version = int(getattr(db_user, "token_version", 0) or 0) + 1
+        revoke_all_trusted_devices(session, db_user.id)
         session.commit()
         session.refresh(db_user)
         access = await auth_service.create_access_token(db_user)
         _set_access_cookie(response, access)
+        _clear_trusted_cookie(response)
     return {"ok": True}
 
 
@@ -237,8 +412,13 @@ async def change_username(
     )
     with db_service.get_session() as session:
         db_user = session.query(User).filter(User.id == user.user_id).first()
-        if not db_user or not auth_service.verify_password(body.current_password, db_user.hashed_password):
-            raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        if db_user.hashed_password:
+            if not auth_service.verify_password(body.current_password, db_user.hashed_password):
+                raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
+        elif not getattr(db_user, "google_sub", None):
+            raise HTTPException(status_code=400, detail="Нельзя сменить имя")
         taken = session.query(User).filter(User.username == body.username, User.id != db_user.id).first()
         if taken:
             raise HTTPException(status_code=409, detail="Это имя уже занято")
@@ -303,3 +483,160 @@ async def totp_confirm(
         db_user.totp_enabled = True
         session.commit()
         return {"ok": True, "totp_enabled": True}
+
+
+@router.post("/totp/complete", response_model=Token)
+async def totp_complete(
+    body: TotpCompleteRequest,
+    request: Request,
+    response: Response,
+):
+    """Завершить Google (или иной) login после pending_2fa cookie."""
+    check_rate_limit(
+        "totp-complete",
+        client_ip_from_request(request),
+        settings.SECURITY_TOTP_MAX_ATTEMPTS,
+        settings.SECURITY_TOTP_WINDOW_SECONDS,
+        "Слишком много попыток 2FA. Попробуйте позже.",
+    )
+    uid = _read_pending_2fa_user_id(request.cookies.get(PENDING_2FA_COOKIE))
+    if uid is None:
+        raise HTTPException(status_code=401, detail="Сессия 2FA истекла — войдите снова")
+    with db_service.get_session() as session:
+        user = session.query(User).filter(User.id == uid).first()
+        if not user or not user.is_active or not getattr(user, "totp_enabled", False):
+            _clear_pending_2fa_cookie(response)
+            raise HTTPException(status_code=401, detail="Сессия 2FA истекла — войдите снова")
+        if not _verify_totp(user, body.code):
+            raise HTTPException(status_code=401, detail="Неверный код")
+        return await _finish_login(
+            response,
+            session,
+            user,
+            request,
+            remember_device=bool(body.remember_device),
+            totp_just_ok=True,
+        )
+
+
+@router.get("/google/start")
+async def google_start(request: Request, response: Response):
+    if not google_oauth_configured():
+        raise HTTPException(status_code=503, detail="Вход через Google не настроен")
+    check_rate_limit(
+        "google-start",
+        client_ip_from_request(request),
+        30,
+        300,
+        "Слишком много попыток входа через Google.",
+    )
+    state = new_oauth_state()
+    response = RedirectResponse(url=build_authorize_url(state), status_code=302)
+    response.set_cookie(
+        key=OAUTH_STATE_COOKIE,
+        value=state,
+        max_age=600,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="lax",
+        path=COOKIE_PATH,
+    )
+    return response
+
+
+def _auth_redirect(query: dict) -> RedirectResponse:
+    base = _frontend_base() or "/"
+    qs = urlencode(query)
+    url = f"{base}/?{qs}" if base != "/" else f"/?{qs}"
+    return RedirectResponse(url=url, status_code=302)
+
+
+@router.get("/google/callback")
+async def google_callback(
+    request: Request,
+    response: Response,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    if not google_oauth_configured():
+        return _auth_redirect({"auth": "error", "reason": "google_disabled"})
+    if error:
+        return _auth_redirect({"auth": "error", "reason": "google_denied"})
+    expected = request.cookies.get(OAUTH_STATE_COOKIE) or ""
+    if not state or not expected or not constant_time_secret_equal(expected, state):
+        return _auth_redirect({"auth": "error", "reason": "state"})
+    if not code:
+        return _auth_redirect({"auth": "error", "reason": "code"})
+
+    check_rate_limit(
+        "google-callback",
+        client_ip_from_request(request),
+        30,
+        300,
+        "Слишком много попыток входа через Google.",
+    )
+
+    try:
+        info = exchange_code_for_userinfo(code)
+    except ValueError:
+        return _auth_redirect({"auth": "error", "reason": "token"})
+
+    with db_service.get_session() as session:
+        user = session.query(User).filter(User.google_sub == info["sub"]).first()
+        if not user:
+            user = session.query(User).filter(User.email == info["email"]).first()
+            if user:
+                user.google_sub = info["sub"]
+                user.email_verified = True
+            else:
+                base_name = username_from_google(info["email"], info.get("name") or "")
+                user = User(
+                    username=unique_username(session, User, base_name),
+                    email=info["email"],
+                    hashed_password=None,
+                    is_active=True,
+                    is_admin=False,
+                    token_version=0,
+                    google_sub=info["sub"],
+                    email_verified=True,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow(),
+                    last_login=datetime.utcnow(),
+                )
+                session.add(user)
+            try:
+                session.commit()
+                session.refresh(user)
+            except IntegrityError:
+                session.rollback()
+                return _auth_redirect({"auth": "error", "reason": "conflict"})
+
+        if not user.is_active:
+            return _auth_redirect({"auth": "error", "reason": "disabled"})
+
+        if getattr(user, "totp_enabled", False):
+            trusted = find_valid_trusted_device(
+                session, user.id, request.cookies.get(TRUSTED_COOKIE)
+            )
+            if not trusted:
+                session.commit()
+                redirect = _auth_redirect({"auth": "totp_required"})
+                redirect.delete_cookie(
+                    OAUTH_STATE_COOKIE, path=COOKIE_PATH, samesite="lax", secure=_cookie_secure()
+                )
+                _set_pending_2fa_cookie(redirect, user.id)
+                return redirect
+
+        user.last_login = datetime.utcnow()
+        user.email_verified = True
+        if not user.google_sub:
+            user.google_sub = info["sub"]
+        session.commit()
+        session.refresh(user)
+        access = await auth_service.create_access_token(user)
+
+    redirect = _auth_redirect({"auth": "ok"})
+    redirect.delete_cookie(OAUTH_STATE_COOKIE, path=COOKIE_PATH, samesite="lax", secure=_cookie_secure())
+    _set_access_cookie(redirect, access)
+    return redirect

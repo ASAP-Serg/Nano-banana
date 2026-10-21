@@ -385,9 +385,12 @@ class TestResidualRemoteSurface(unittest.TestCase):
             encoding="utf-8"
         )
         auth_core = (root / "packages" / "core" / "nano_banana" / "auth.py").read_text(encoding="utf-8")
-        self.assertIn('samesite="strict"', auth_router)
-        self.assertNotIn('samesite="lax"', auth_router)
-        self.assertNotIn("TOTP_REQUIRED", auth_router)
+        # Session + trusted device stay strict; OAuth state / pending_2fa need lax for Google redirect.
+        access_fn = auth_router.split("def _set_access_cookie", 1)[1].split("def ", 1)[0]
+        self.assertIn('samesite="strict"', access_fn)
+        trusted_fn = auth_router.split("def _set_trusted_cookie", 1)[1].split("def ", 1)[0]
+        self.assertIn('samesite="strict"', trusted_fn)
+        self.assertIn('samesite="lax"', auth_router)
         self.assertIn("DUMMY_PASSWORD_HASH", auth_core)
         self.assertNotIn('"is_admin": user_data.is_admin', auth_core)
         self.assertNotIn('"email": user_data.email', auth_core)
@@ -608,4 +611,69 @@ class TestTotpQrIsLocal(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             otpauth_qr_data_url("https://chart.googleapis.com/evil")
+
+
+class TestTrustedDeviceAndGoogle(unittest.TestCase):
+    def test_token_hash_is_stable_and_opaque(self):
+        from nano_banana.trusted_device import _hash_token
+
+        a = _hash_token("device-secret-aaa")
+        b = _hash_token("device-secret-aaa")
+        c = _hash_token("device-secret-bbb")
+        self.assertEqual(a, b)
+        self.assertNotEqual(a, c)
+        self.assertEqual(len(a), 64)
+        self.assertNotIn("device-secret", a)
+
+    def test_auth_router_wires_trusted_and_google(self):
+        from pathlib import Path
+
+        auth_router = (
+            Path(__file__).resolve().parents[1]
+            / "apps"
+            / "api"
+            / "nano_banana_api"
+            / "routers"
+            / "auth.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("find_valid_trusted_device", auth_router)
+        self.assertIn("issue_trusted_device", auth_router)
+        self.assertIn("remember_device", auth_router)
+        self.assertIn("/google/start", auth_router)
+        self.assertIn("/google/callback", auth_router)
+        self.assertIn("/totp/complete", auth_router)
+        self.assertIn("nb_pending_2fa", auth_router.replace("PENDING_2FA_COOKIE", "nb_pending_2fa"))
+        self.assertIn("OAUTH_STATE_COOKIE", auth_router)
+
+    def test_google_username_from_email(self):
+        from nano_banana.google_oauth import username_from_google
+
+        name = username_from_google("serg.test@gmail.com", "")
+        self.assertGreaterEqual(len(name), 3)
+        self.assertLessEqual(len(name), 32)
+        self.assertNotIn("@", name)
+
+    def test_login_schema_has_remember_device(self):
+        from nano_banana.schemas import UserLoginRequest, TotpCompleteRequest
+
+        body = UserLoginRequest(
+            username_or_email="serg",
+            password="1234567890",
+            totp_code="123456",
+            remember_device=True,
+        )
+        self.assertTrue(body.remember_device)
+        done = TotpCompleteRequest(code="123456", remember_device=True)
+        self.assertEqual(done.code, "123456")
+
+    def test_web_auth_ui_has_google_and_remember(self):
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1] / "apps" / "web" / "src"
+        modals = (root / "components" / "AuthModals.jsx").read_text(encoding="utf-8")
+        api = (root / "api.js").read_text(encoding="utf-8")
+        self.assertIn("Запомнить это устройство", modals)
+        self.assertIn("googleStartUrl", api)
+        self.assertIn("totpComplete", api)
+        self.assertIn("revokeTrustedDevices", api)
 

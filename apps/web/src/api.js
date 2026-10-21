@@ -45,12 +45,17 @@ async function request(path, { method = "GET", body, auth = true, headers = {} }
 }
 
 export const api = {
-  login: (username_or_email, password, totp_code) =>
+  providers: () => request("/auth/providers", { auth: false }),
+  googleStartUrl: () => `${API}/auth/google/start`,
+  login: (username_or_email, password, totp_code, remember_device = false) =>
     request("/auth/login", {
       method: "POST",
-      body: totp_code
-        ? { username_or_email, password, totp_code }
-        : { username_or_email, password },
+      body: {
+        username_or_email,
+        password,
+        remember_device: Boolean(remember_device),
+        ...(totp_code ? { totp_code } : {}),
+      },
       auth: false,
     }),
   register: (username, email, password) =>
@@ -60,9 +65,16 @@ export const api = {
   changePassword: (current_password, new_password) =>
     request("/auth/password", { method: "POST", body: { current_password, new_password } }),
   changeUsername: (current_password, username) =>
-    request("/auth/username", { method: "POST", body: { current_password, username } }),
+    request("/auth/username", { method: "POST", body: { current_password: current_password || "", username } }),
   totpBegin: () => request("/auth/totp/begin", { method: "POST" }),
   totpConfirm: (code) => request("/auth/totp/confirm", { method: "POST", body: { code } }),
+  totpComplete: (code, remember_device = false) =>
+    request("/auth/totp/complete", {
+      method: "POST",
+      body: { code, remember_device: Boolean(remember_device) },
+      auth: false,
+    }),
+  revokeTrustedDevices: () => request("/auth/trusted-devices", { method: "DELETE" }),
   models: () => request("/images/models"),
   generate: (payload) => request("/images/generate", { method: "POST", body: payload }),
   list: (limit = 50, offset = 0) => request(`/images/list?limit=${limit}&offset=${offset}`),

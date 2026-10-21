@@ -86,6 +86,10 @@ class Settings(BaseSettings):
     PWD_SCHEMES: str = "bcrypt"
     SECURITY_ALLOW_PUBLIC_REGISTER: bool = False
     ADMIN_BOOTSTRAP_SECRET: str = ""
+    SECURITY_TRUSTED_DEVICE_DAYS: int = 30
+    GOOGLE_OAUTH_CLIENT_ID: str = ""
+    GOOGLE_OAUTH_CLIENT_SECRET: str = ""
+    GOOGLE_OAUTH_REDIRECT_URI: str = ""
 
     BANANALAB_API_BASE_URL: str = "https://api.moonez.ai/api"
     REPLICATE_API_TOKEN: str = ""

@@ -23,6 +23,9 @@ export default function App() {
   const [showAccount, setShowAccount] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
   const [showTotp, setShowTotp] = useState(false);
+  const [showTotpComplete, setShowTotpComplete] = useState(false);
+  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [trustedDeviceDays, setTrustedDeviceDays] = useState(30);
   const [status, setStatus] = useState(null);
   const [models, setModels] = useState({});
   const [defaultModel, setDefaultModel] = useState("nano-banana-pro");
@@ -43,6 +46,16 @@ export default function App() {
     localStorage.setItem("nb_theme", theme);
   }, [theme]);
 
+  useEffect(() => {
+    api
+      .providers()
+      .then((p) => {
+        setGoogleEnabled(Boolean(p?.google));
+        if (p?.trusted_device_days) setTrustedDeviceDays(Number(p.trusted_device_days) || 30);
+      })
+      .catch(() => setGoogleEnabled(false));
+  }, []);
+
   const loadMe = useCallback(async () => {
     try {
       setUser(await api.me());
@@ -52,6 +65,37 @@ export default function App() {
       setAuthChecked(true);
     }
   }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const auth = params.get("auth");
+    if (!auth) return;
+    const clean = () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      url.searchParams.delete("reason");
+      window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+    };
+    if (auth === "ok") {
+      clean();
+      loadMe().then(() => toast("Вход выполнен"));
+    } else if (auth === "totp_required") {
+      clean();
+      setShowTotpComplete(true);
+    } else if (auth === "error") {
+      const reason = params.get("reason") || "";
+      clean();
+      const messages = {
+        google_denied: "Вход через Google отменён",
+        state: "Ошибка безопасности входа — попробуйте снова",
+        token: "Не удалось подтвердить аккаунт Google",
+        conflict: "Этот email уже занят",
+        disabled: "Аккаунт отключён",
+        google_disabled: "Вход через Google не настроен",
+      };
+      toast(messages[reason] || "Ошибка входа через Google", "error");
+    }
+  }, [loadMe]);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -120,13 +164,23 @@ export default function App() {
     return () => clearInterval(t);
   }, [user, loadModels, loadGallery]);
 
-  async function onLogin(e) {
-    e.preventDefault();
-    const form = new FormData(e.target);
+  async function onLogin(form, rememberDevice) {
     try {
-      await api.login(form.get("username"), form.get("password"), form.get("totp"));
+      await api.login(form.get("username"), form.get("password"), form.get("totp"), rememberDevice);
       clearLegacyToken();
       setShowLogin(false);
+      await loadMe();
+      toast("Вход выполнен");
+    } catch (err) {
+      toast(err.message, "error");
+    }
+  }
+
+  async function onTotpComplete(code, rememberDevice) {
+    try {
+      await api.totpComplete(code, rememberDevice);
+      clearLegacyToken();
+      setShowTotpComplete(false);
       await loadMe();
       toast("Вход выполнен");
     } catch (err) {
@@ -304,14 +358,19 @@ export default function App() {
       <AuthModals
         showLogin={showLogin}
         showRegister={showRegister}
+        showTotpComplete={showTotpComplete}
         onCloseLogin={() => setShowLogin(false)}
         onCloseRegister={() => setShowRegister(false)}
+        onCloseTotpComplete={() => setShowTotpComplete(false)}
         onOpenRegister={() => {
           setShowLogin(false);
           setShowRegister(true);
         }}
         onLogin={onLogin}
         onRegister={onRegister}
+        onTotpComplete={onTotpComplete}
+        googleEnabled={googleEnabled}
+        trustedDeviceDays={trustedDeviceDays}
       />
       {showTotp && user?.is_admin && !user.totp_enabled && (
         <TotpSetup

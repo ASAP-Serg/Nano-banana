@@ -14,7 +14,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)  # null = Google-only
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)  # Переименовано из is_superuser
     is_operator = Column(Boolean, default=False)  # Примерка мозаики, обычная генерация остаётся
@@ -22,12 +22,15 @@ class User(Base):
     totp_secret = Column(String, nullable=True)  # зашифрованный секрет TOTP
     totp_enabled = Column(Boolean, default=False)
     token_version = Column(Integer, default=0, nullable=False)  # bump → все JWT этого юзера мертвы
+    google_sub = Column(String, unique=True, index=True, nullable=True)
+    email_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
 
     # Связь 1 ко многим (User → Generations)
     generations = relationship("Generation", back_populates="user", cascade="all, delete-orphan")
+    trusted_devices = relationship("TrustedDevice", back_populates="user", cascade="all, delete-orphan")
 
 class Generation(Base):
     __tablename__ = "generations"
@@ -78,4 +81,20 @@ class AdminAuditLog(Base):
     action = Column(String, nullable=False, index=True)  # grant_admin / revoke_admin / etc.
     details = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class TrustedDevice(Base):
+    """Устройство, на котором можно не спрашивать TOTP N дней."""
+
+    __tablename__ = "trusted_devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash = Column(String, unique=True, nullable=False)
+    label = Column(String, nullable=True)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="trusted_devices")
 

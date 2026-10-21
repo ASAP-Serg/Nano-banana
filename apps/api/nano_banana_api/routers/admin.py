@@ -21,6 +21,7 @@ from nano_banana.generation.cost import estimate_cost_usd
 from nano_banana.idle import IDLE_GENERATION_DAYS, is_generation_idle
 from nano_banana.storage.media import client_reference_urls, client_result_url
 from nano_banana.storage.s3 import MinioService
+from nano_banana.trusted_device import revoke_all_trusted_devices
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 _minio: Optional[MinioService] = None
@@ -445,6 +446,7 @@ async def admin_deactivate_user(
         _forbid_last_active_admin(session, target)
         target.is_active = False
         target.token_version = int(getattr(target, "token_version", 0) or 0) + 1
+        revoke_all_trusted_devices(session, target.id)
         _audit_admin_action(
             session=session,
             actor_admin_id=user.user_id,

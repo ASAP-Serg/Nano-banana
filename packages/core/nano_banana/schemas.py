@@ -54,6 +54,7 @@ class UserLoginRequest(BaseModel):
     username_or_email: str
     password: str
     totp_code: Optional[str] = None
+    remember_device: bool = False
 
     @field_validator("totp_code")
     @classmethod
@@ -67,6 +68,20 @@ class UserLoginRequest(BaseModel):
             raise ValueError("Код: 6 цифр")
         return digits
 
+
+class TotpCompleteRequest(BaseModel):
+    code: str
+    remember_device: bool = False
+
+    @field_validator("code")
+    @classmethod
+    def validate_complete_code(cls, v: str) -> str:
+        digits = "".join(ch for ch in str(v) if ch.isdigit())
+        if len(digits) != 6:
+            raise ValueError("Код: 6 цифр")
+        return digits
+
+
 class UserResponse(BaseModel):
     id: int
     username: str
@@ -75,6 +90,8 @@ class UserResponse(BaseModel):
     is_admin: bool
     is_operator: bool = False
     totp_enabled: bool = False
+    has_password: bool = True
+    google_linked: bool = False
     created_at: datetime
     
     class Config:
@@ -116,15 +133,14 @@ class PasswordChangeRequest(BaseModel):
 
 
 class UsernameChangeRequest(BaseModel):
-    current_password: str
+    current_password: str = ""
     username: str
 
     @field_validator("current_password")
     @classmethod
     def validate_current_password(cls, v: str) -> str:
-        if not (v or "").strip():
-            raise ValueError("Нужен текущий пароль")
-        return v
+        # Пустой допустим для Google-only (проверка в роутере).
+        return (v or "").strip()
 
     @field_validator("username")
     @classmethod
