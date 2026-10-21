@@ -146,6 +146,18 @@ class ResetPasswordRequest(BaseModel):
         return v
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+    @field_validator("token")
+    @classmethod
+    def validate_verify_token(cls, v: str) -> str:
+        text = (v or "").strip()
+        if len(text) < 20:
+            raise ValueError("Некорректный токен")
+        return text
+
+
 class ResendVerifyRequest(BaseModel):
     email: EmailStr
 

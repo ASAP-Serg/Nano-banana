@@ -696,6 +696,8 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
             / "auth.py"
         ).read_text(encoding="utf-8")
         self.assertIn("/verify-email", auth_router)
+        self.assertIn("auth=verify#token=", auth_router)
+        self.assertIn("verify_email_post", auth_router)
         self.assertIn("/forgot-password", auth_router)
         self.assertIn("/reset-password", auth_router)
         self.assertIn("/profile/complete", auth_router)
@@ -784,6 +786,8 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("CSRF allowlist empty", main)
         self.assertIn("CSRF origin required", main)
+        self.assertIn("bearer_ok", main)
+        self.assertIn("has_auth_cookie", main)
         self.assertNotIn(
             'if api_lower.startswith("https://") and "localhost" not in api_lower:\n'
             '                return JSONResponse(status_code=403, content={"detail": "CSRF origin required"})',

@@ -64,6 +64,8 @@ export const api = {
     request("/auth/forgot-password", { method: "POST", body: { email }, auth: false }),
   resetPassword: (token, new_password) =>
     request("/auth/reset-password", { method: "POST", body: { token, new_password }, auth: false }),
+  verifyEmail: (token) =>
+    request("/auth/verify-email", { method: "POST", body: { token }, auth: false }),
   resendVerification: (email) =>
     request("/auth/resend-verification", { method: "POST", body: { email }, auth: false }),
   updateEmail: (email, current_password = "") =>

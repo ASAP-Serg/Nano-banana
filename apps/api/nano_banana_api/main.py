@@ -81,15 +81,18 @@ class CookieCsrfMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method.upper() in self._SAFE:
             return await call_next(request)
-        # Bearer clients are not cookie-CSRF; skip when Authorization present.
-        if request.headers.get("authorization"):
-            return await call_next(request)
-        # Any auth-ish cookie makes the request a CSRF target (not only nb_access).
-        if not (
+        has_auth_cookie = bool(
             request.cookies.get("nb_access")
             or request.cookies.get("nb_pending_2fa")
             or request.cookies.get("nb_pending_profile")
-        ):
+        )
+        # Pure Bearer (no auth cookies) is not cookie-CSRF. Fake/empty Authorization
+        # must NOT skip the check when a session cookie is present.
+        auth_hdr = (request.headers.get("authorization") or "").strip()
+        bearer_ok = auth_hdr.lower().startswith("bearer ") and bool(auth_hdr.split(" ", 1)[-1].strip())
+        if bearer_ok and not has_auth_cookie:
+            return await call_next(request)
+        if not has_auth_cookie:
             return await call_next(request)
         allowed = {o.strip().rstrip("/") for o in CORS_ORIGINS if o.strip() and o.strip() != "*"}
         api_url = (settings.API_URL or "").strip().rstrip("/")

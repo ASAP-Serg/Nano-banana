@@ -123,6 +123,23 @@ export default function App() {
       window.history.replaceState({}, "", url.pathname + url.search);
       setResetToken(token);
       setShowReset(true);
+    } else if (auth === "verify") {
+      const hashParams = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
+      const token = hashParams.get("token") || params.get("token") || "";
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      url.searchParams.delete("reason");
+      url.searchParams.delete("token");
+      url.hash = "";
+      window.history.replaceState({}, "", url.pathname + url.search);
+      if (!token) {
+        toast("Ссылка подтверждения недействительна", "error");
+        return;
+      }
+      api
+        .verifyEmail(token)
+        .then(() => loadMe().then(() => toast("Email подтверждён")))
+        .catch((err) => toast(err.message || "Не удалось подтвердить email", "error"));
     } else if (auth === "error") {
       const reason = params.get("reason") || "";
       cleanAll();

@@ -49,6 +49,7 @@ from nano_banana.schemas import (
     UserCreateRequest,
     UserLoginRequest,
     UserResponse,
+    VerifyEmailRequest,
 )
 from nano_banana.generation.cleanup import delete_generation_assets
 from nano_banana.storage.s3 import MinioService
@@ -240,8 +241,9 @@ def _read_pending_profile(raw: Optional[str]) -> Optional[dict]:
 
 
 def _verify_link(raw_token: str) -> str:
+    # Fragment keeps the token out of nginx access logs / Referer (SPA posts it).
     base = _frontend_base().rstrip("/")
-    return f"{base}/api/v1/auth/verify-email?token={raw_token}"
+    return f"{base}/?auth=verify#token={raw_token}"
 
 
 def _reset_link(raw_token: str) -> str:
@@ -476,8 +478,25 @@ async def logout(request: Request, response: Response):
     return {"ok": True}
 
 
+async def _consume_verify_and_login(token: str, response: Response) -> bool:
+    with db_service.get_session() as session:
+        uid = consume_token(session, token, PURPOSE_VERIFY)
+        if uid is None:
+            return False
+        user = session.query(User).filter(User.id == uid).first()
+        if not user or not user.is_active:
+            return False
+        user.email_verified = True
+        session.commit()
+        session.refresh(user)
+        access = await auth_service.create_access_token(user)
+    _set_access_cookie(response, access)
+    return True
+
+
 @router.get("/verify-email")
-async def verify_email(token: str, request: Request, response: Response):
+async def verify_email_get(token: str, request: Request):
+    """Legacy links with ?token= — bounce into SPA hash flow (no auto-login on GET)."""
     check_rate_limit(
         "verify-email",
         client_ip_from_request(request),
@@ -485,20 +504,27 @@ async def verify_email(token: str, request: Request, response: Response):
         3600,
         "Слишком много попыток подтверждения. Попробуйте позже.",
     )
-    with db_service.get_session() as session:
-        uid = consume_token(session, token, PURPOSE_VERIFY)
-        if uid is None:
-            return _auth_redirect({"auth": "error", "reason": "verify_token"})
-        user = session.query(User).filter(User.id == uid).first()
-        if not user or not user.is_active:
-            return _auth_redirect({"auth": "error", "reason": "verify_token"})
-        user.email_verified = True
-        session.commit()
-        session.refresh(user)
-        access = await auth_service.create_access_token(user)
-    redirect = _auth_redirect({"auth": "verified"})
-    _set_access_cookie(redirect, access)
-    return redirect
+    raw = (token or "").strip()
+    if len(raw) < 20:
+        return _auth_redirect({"auth": "error", "reason": "verify_token"})
+    # Bounce into SPA with token in the fragment (not query) — SPA will POST.
+    base = _frontend_base().rstrip("/")
+    return RedirectResponse(url=f"{base}/?auth=verify#token={raw}", status_code=302)
+
+
+@router.post("/verify-email")
+async def verify_email_post(body: VerifyEmailRequest, request: Request, response: Response):
+    check_rate_limit(
+        "verify-email-post",
+        client_ip_from_request(request),
+        30,
+        3600,
+        "Слишком много попыток подтверждения. Попробуйте позже.",
+    )
+    ok = await _consume_verify_and_login(body.token, response)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Ссылка недействительна или устарела")
+    return {"ok": True, "verified": True}
 
 
 @router.post("/resend-verification")
