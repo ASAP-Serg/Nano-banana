@@ -121,12 +121,13 @@ const GenerateForm = forwardRef(function GenerateForm({
     return () => window.removeEventListener("click", close);
   }, [aspectOpen, modelOpen]);
 
-  // Ctrl+V works even when focus is in prompt/negative fields
+  // Single capture listener — do not also put onPaste on drop zones (that doubled refs).
   useEffect(() => {
     const onPaste = (e) => {
       const files = imageFilesFromClipboardEvent(e);
       if (!files.length) return;
       e.preventDefault();
+      e.stopPropagation();
       void (async () => {
         const extra = await collectImageFiles(files);
         if (!extra.length) return;
@@ -456,13 +457,6 @@ const GenerateForm = forwardRef(function GenerateForm({
                 e.preventDefault();
                 if (e.dataTransfer.files?.length) addFiles(e.dataTransfer.files);
               }}
-              onPaste={(e) => {
-                const files = imageFilesFromClipboardEvent(e);
-                if (!files.length) return;
-                e.preventDefault();
-                e.stopPropagation();
-                addFiles(files);
-              }}
             >
               <p className="mb-2">Перетащите до 4 референсов, выберите файлы или вставьте из буфера. Можно менять местами.</p>
               <div className="d-flex gap-2 flex-wrap">
@@ -515,31 +509,7 @@ const GenerateForm = forwardRef(function GenerateForm({
             </div>
           )}
           {mode === "mosaic" && (
-            <div
-              className="mb-3"
-              tabIndex={0}
-              onPaste={(e) => {
-                const files = imageFilesFromClipboardEvent(e);
-                if (!files.length) return;
-                e.preventDefault();
-                e.stopPropagation();
-                void (async () => {
-                  const extra = await collectImageFiles(files);
-                  if (!extra.length) return;
-                  setMosaicRefs((prev) => {
-                    const next = [...prev];
-                    let cursor = 0;
-                    for (const file of extra) {
-                      while (cursor < next.length && next[cursor]) cursor += 1;
-                      if (cursor >= next.length) break;
-                      next[cursor] = file;
-                      cursor += 1;
-                    }
-                    return next;
-                  });
-                })();
-              }}
-            >
+            <div className="mb-3" tabIndex={0}>
               <div className="btn-group mb-2 flex-wrap">
                 {[
                   ["direct", "Transfer"],
