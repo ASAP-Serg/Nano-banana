@@ -58,15 +58,31 @@ export function isSafeMediaUrl(url) {
   }
 }
 
+async function fetchDownloadBlob(imageUrl) {
+  // /file may 302 to Moonez CDN (Allow-Origin: *). Following that redirect
+  // with credentials:include is blocked by browsers — resolve Location ourselves.
+  const first = await fetch(imageUrl, { credentials: "include", redirect: "manual" });
+  if (first.status >= 300 && first.status < 400) {
+    const location = first.headers.get("Location");
+    if (!location) throw new Error(`HTTP ${first.status}`);
+    const cdn = await fetch(location, { credentials: "omit", mode: "cors", redirect: "follow" });
+    if (!cdn.ok) throw new Error(`HTTP ${cdn.status}`);
+    return cdn.blob();
+  }
+  if (first.type === "opaqueredirect") {
+    throw new Error("Не удалось скачать изображение");
+  }
+  if (!first.ok) throw new Error(`HTTP ${first.status}`);
+  return first.blob();
+}
+
 export async function downloadImage(imageUrl, prompt) {
   if (!isSafeMediaUrl(imageUrl)) {
     toast("Некорректная ссылка на изображение", "error");
     return;
   }
   try {
-    const response = await fetch(imageUrl, { credentials: "include" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const blob = await response.blob();
+    const blob = await fetchDownloadBlob(imageUrl);
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
