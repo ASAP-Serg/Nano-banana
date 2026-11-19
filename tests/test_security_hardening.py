@@ -878,7 +878,9 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         # Inside /assets/ block, CSP must be re-declared (nginx inheritance quirk).
         assets = compose.split("location /assets/")[1].split("location /")[0]
         self.assertIn("Content-Security-Policy", assets)
+        self.assertIn("cdn.rendergrid.io", assets)
         self.assertIn("X-Frame-Options", assets)
+        self.assertIn("cdn.rendergrid.io", compose)
 
 
 class TestOwaspSecurityContracts(unittest.TestCase):
