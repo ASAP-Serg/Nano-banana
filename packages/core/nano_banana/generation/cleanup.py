@@ -71,6 +71,7 @@ def cleanup_old_generations(minio: MinioService, retention_days: int = RETENTION
 def reclaim_unlocked_jobs() -> int:
     """Вернуть в очередь running/pending/paused без живого lock (рестарт воркера)."""
     queue = get_job_queue()
+    queue.clear_foreign_locks()
     requeued = 0
     with db_service.get_session() as session:
         rows = (

@@ -112,6 +112,28 @@ class JobQueue:
     def has_lock(self, generation_id: int) -> bool:
         return self.client.exists(self.lock_key(generation_id)) == 1
 
+    def clear_foreign_locks(self) -> int:
+        """Drop locks owned by other/dead workers after a restart.
+
+        Single-worker deploy: any lock whose value != this worker_id is orphaned
+        and would leave the UI spinning until JOB_LOCK_TTL expires (~15 min).
+        """
+        cleared = 0
+        pattern = f"{LOCK_PREFIX}*"
+        for key in self.client.scan_iter(match=pattern, count=200):
+            try:
+                owner = self.client.get(key)
+                if isinstance(owner, bytes):
+                    owner = owner.decode("utf-8", errors="ignore")
+                if owner and owner != self.worker_id:
+                    if self.client.delete(key):
+                        cleared += 1
+            except Exception:
+                logger.exception("[QUEUE] clear_foreign_locks key=%s", key)
+        if cleared:
+            logger.warning("[QUEUE] cleared orphan locks=%s worker=%s", cleared, self.worker_id)
+        return cleared
+
     def queue_size(self) -> int:
         self._promote_delayed()
         return int(self.client.llen(JOBS_QUEUE) + self.client.zcard(DELAYED_ZSET))
