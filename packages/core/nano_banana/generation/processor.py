@@ -403,12 +403,27 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                     def _on_download_progress(done: int, total: int | None) -> None:
                         queue.refresh_lock(generation_id)
 
+                    # RU VPS → Cloudflare CDN can hang for minutes and block the whole
+                    # worker (next gens never reach Moonez). Cap persist; keep CDN fallback.
+                    upload_result = None
                     try:
-                        upload_result = persist_generation_result(
-                            get_storage(),
-                            result,
-                            on_progress=_on_download_progress,
-                        )
+                        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+                        with ThreadPoolExecutor(max_workers=1) as pool:
+                            fut = pool.submit(
+                                persist_generation_result,
+                                get_storage(),
+                                result,
+                                on_progress=_on_download_progress,
+                            )
+                            try:
+                                upload_result = fut.result(timeout=45)
+                            except FuturesTimeout:
+                                logger.warning(
+                                    "[GENERATION] MinIO persist timed out gen=%s (CDN fallback active)",
+                                    generation_id,
+                                )
+                                return
                     except Exception:
                         logger.exception(
                             "[GENERATION] MinIO persist failed gen=%s (CDN fallback active)",
