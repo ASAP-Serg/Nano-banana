@@ -72,7 +72,9 @@ class AuthService:
         to_encode.update({"exp": expire})
         return jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
 
-    async def create_access_token(self, user_data: User) -> str:
+    async def create_access_token(
+        self, user_data: User, expires_delta: Optional[timedelta] = None
+    ) -> str:
         """Создание access токена. Роли и email не кладём в JWT — только из БД."""
         return self.create_token(
             data={
@@ -80,7 +82,7 @@ class AuthService:
                 "user_id": user_data.id,
                 "ver": int(getattr(user_data, "token_version", 0) or 0),
             },
-            expires_delta=self.access_token_expire
+            expires_delta=expires_delta or self.access_token_expire,
         )
 
     async def create_refresh_token(self, user_data: User) -> str:

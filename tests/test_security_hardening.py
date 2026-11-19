@@ -394,6 +394,12 @@ class TestResidualRemoteSurface(unittest.TestCase):
         self.assertIn("DUMMY_PASSWORD_HASH", auth_core)
         self.assertNotIn('"is_admin": user_data.is_admin', auth_core)
         self.assertNotIn('"email": user_data.email', auth_core)
+        # "Remember me" must extend the access cookie, not only skip TOTP.
+        self.assertIn("def _access_max_age_seconds", auth_router)
+        self.assertIn("SECURITY_TRUSTED_DEVICE_DAYS", auth_router)
+        finish = auth_router.split("async def _finish_login", 1)[1].split("\n@", 1)[0]
+        self.assertIn("remember_device=remember_device", finish)
+        self.assertIn("expires_delta=_access_expires_delta", finish)
 
     def test_client_media_urls_are_relative_proxy(self):
         from nano_banana.storage.media import client_reference_urls, client_result_url

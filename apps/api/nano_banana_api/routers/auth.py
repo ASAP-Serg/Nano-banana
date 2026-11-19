@@ -87,12 +87,23 @@ def _frontend_base() -> str:
     return (settings.API_URL or "").rstrip("/") or ""
 
 
-def _set_access_cookie(response: Response, token: str) -> None:
-    max_age = int(settings.ACCESS_TOKEN_EXPIRE_MINUTES) * 60
+def _access_max_age_seconds(*, remember_device: bool = False) -> int:
+    if remember_device:
+        return max(1, int(settings.SECURITY_TRUSTED_DEVICE_DAYS)) * 24 * 60 * 60
+    return max(60, int(settings.ACCESS_TOKEN_EXPIRE_MINUTES) * 60)
+
+
+def _access_expires_delta(*, remember_device: bool = False) -> timedelta:
+    return timedelta(seconds=_access_max_age_seconds(remember_device=remember_device))
+
+
+def _set_access_cookie(
+    response: Response, token: str, *, remember_device: bool = False
+) -> None:
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
-        max_age=max_age,
+        max_age=_access_max_age_seconds(remember_device=remember_device),
         httponly=True,
         secure=_cookie_secure(),
         samesite="strict",
@@ -283,6 +294,7 @@ async def _finish_login(
     totp_just_ok: bool,
 ) -> Token:
     user.last_login = datetime.utcnow()
+    # Trusted device: skip TOTP on this browser for N days (admins with 2FA).
     if remember_device and totp_just_ok and getattr(user, "totp_enabled", False):
         raw, max_age = issue_trusted_device(session, user.id, label=_ua_label(request))
         session.commit()
@@ -291,8 +303,12 @@ async def _finish_login(
     else:
         session.commit()
         session.refresh(user)
-    access = await auth_service.create_access_token(user)
-    _set_access_cookie(response, access)
+    # Session cookie: with "remember" stay signed-in for TRUSTED_DEVICE_DAYS;
+    # without it the access JWT dies after ACCESS_TOKEN_EXPIRE_MINUTES (~1h).
+    access = await auth_service.create_access_token(
+        user, expires_delta=_access_expires_delta(remember_device=remember_device)
+    )
+    _set_access_cookie(response, access, remember_device=remember_device)
     _clear_pending_2fa_cookie(response)
     return Token(access_token="", refresh_token="", token_type="cookie")
 
@@ -1196,9 +1212,12 @@ async def google_callback(
             user.google_sub = info["sub"]
         session.commit()
         session.refresh(user)
-        access = await auth_service.create_access_token(user)
+        # Google has no "remember" checkbox — keep the session for trusted-device TTL.
+        access = await auth_service.create_access_token(
+            user, expires_delta=_access_expires_delta(remember_device=True)
+        )
 
     redirect = _auth_redirect({"auth": "ok"})
     redirect.delete_cookie(OAUTH_STATE_COOKIE, path=COOKIE_PATH, samesite="lax", secure=_cookie_secure())
-    _set_access_cookie(redirect, access)
+    _set_access_cookie(redirect, access, remember_device=True)
     return redirect

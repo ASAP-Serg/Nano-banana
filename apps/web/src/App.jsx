@@ -180,17 +180,29 @@ export default function App() {
     }
   }, [loadMe]);
 
+  const handleAuthLost = useCallback(() => {
+    setUser(null);
+    setGallery([]);
+    setGalleryMeta(null);
+    setStatus(null);
+    clearLegacyToken();
+  }, []);
+
   const loadStatus = useCallback(async () => {
     try {
       setStatus(await api.serviceStatus(true));
     } catch (err) {
+      if (err.status === 401) {
+        handleAuthLost();
+        return;
+      }
       setStatus({
         state: "unknown",
         message: err.message || "Не удалось получить статус сервисов",
         services: [],
       });
     }
-  }, []);
+  }, [handleAuthLost]);
 
   const loadGallery = useCallback(async () => {
     if (!user) {
@@ -202,9 +214,13 @@ export default function App() {
       setGallery(data.generations || []);
       setGalleryMeta(data.meta || null);
     } catch (err) {
+      if (err.status === 401) {
+        handleAuthLost();
+        return;
+      }
       toast(err.message, "error");
     }
-  }, [user]);
+  }, [user, handleAuthLost]);
 
   const loadModels = useCallback(async () => {
     if (!user) return;

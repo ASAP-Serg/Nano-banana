@@ -292,7 +292,7 @@ export default function AuthModals({
                 <input className="nb-auth-input" name="totp" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6 цифр — можно пусто" />
                 <label className="nb-auth-check">
                   <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                  Запомнить устройство {trustedDeviceDays} дн.
+                  Оставаться в системе {trustedDeviceDays} дн.
                 </label>
                 <button type="submit" className="nb-auth-primary">
                   Войти
@@ -428,7 +428,7 @@ export default function AuthModals({
               <input className="nb-auth-input" name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="6 цифр" required autoFocus />
               <label className="nb-auth-check">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                Запомнить устройство на {trustedDeviceDays} дн.
+                Оставаться в системе {trustedDeviceDays} дн.
               </label>
               <button type="submit" className="nb-auth-primary">
                 Продолжить

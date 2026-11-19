@@ -1,3 +1,5 @@
+import { reportApiFailure } from "./errorReporter.js";
+
 const API = "/api/v1";
 
 /** Legacy: clear XSS-stealable tokens from older builds. */
@@ -36,6 +38,7 @@ async function request(path, { method = "GET", body, auth = true, headers = {} }
         : Array.isArray(detail)
           ? JSON.stringify(detail)
           : res.statusText;
+    reportApiFailure(path, res.status, message);
     const err = new Error(message || "Ошибка запроса");
     err.status = res.status;
     err.payload = data;
@@ -140,4 +143,5 @@ export const api = {
   adminDeleteUser: (id, password) =>
     request(`/admin/users/${id}`, { method: "DELETE", body: { password } }),
   adminGeneration: (id) => request(`/admin/generations/${id}`),
+  clientErrorsRecent: (limit = 50) => request(`/client-errors/recent?limit=${limit}`),
 };

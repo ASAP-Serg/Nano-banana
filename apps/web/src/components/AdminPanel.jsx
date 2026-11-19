@@ -38,6 +38,7 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
   const [idleOnly, setIdleOnly] = useState(false);
   const [pendingOnly, setPendingOnly] = useState(false);
   const [mosaicPrompts, setMosaicPrompts] = useState(null);
+  const [browserErrors, setBrowserErrors] = useState([]);
   const pageSize = 24;
 
   function askPassword(title) {
@@ -96,9 +97,19 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
     }
   }
 
+  async function loadBrowserErrors() {
+    try {
+      const d = await api.clientErrorsRecent(40);
+      setBrowserErrors(d.items || []);
+    } catch {
+      setBrowserErrors([]);
+    }
+  }
+
   useEffect(() => {
     load();
     loadGens(0, query);
+    loadBrowserErrors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -545,6 +556,44 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
                 </div>
               ))}
             </div>
+            <div className="d-flex justify-content-between align-items-center mt-4 mb-2">
+              <h6 className="mb-0">Ошибки браузера</h6>
+              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadBrowserErrors}>
+                Обновить
+              </button>
+            </div>
+            {browserErrors.length === 0 ? (
+              <p className="small text-muted">Пока пусто — клиент шлёт сюда JS/API сбои (без 401).</p>
+            ) : (
+              <div className="table-responsive" style={{ maxHeight: 280, overflow: "auto" }}>
+                <table className="table table-sm align-middle">
+                  <thead>
+                    <tr>
+                      <th>Когда</th>
+                      <th>Источник</th>
+                      <th>Сообщение</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {browserErrors.map((e, i) => (
+                      <tr key={`${e.ts || 0}-${i}`}>
+                        <td className="small text-nowrap">
+                          {e.ts ? new Date(e.ts * 1000).toLocaleString() : "—"}
+                        </td>
+                        <td className="small">
+                          {e.source}
+                          {e.status ? ` ${e.status}` : ""}
+                          {e.path ? ` ${e.path}` : ""}
+                        </td>
+                        <td className="small" title={e.stack || ""}>
+                          {(e.message || "").slice(0, 160)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       </div>
