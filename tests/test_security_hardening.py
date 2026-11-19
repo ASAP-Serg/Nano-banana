@@ -966,7 +966,7 @@ class TestOwaspSecurityContracts(unittest.TestCase):
         self.assertIn("Снимать админов может только суперадмин", revoke_block)
 
     def test_storage_nginx_blocks_console_and_minio(self):
-        storage = self._repo("deploy", "nginx", "storage.ooneclickk.ru.conf")
+        storage = self._repo("deploy", "nginx", "storage.example.conf")
         self.assertIn("location = /console { return 404; }", storage)
         self.assertIn("location /console/ { return 404; }", storage)
         self.assertIn("location = /minio { return 404; }", storage)

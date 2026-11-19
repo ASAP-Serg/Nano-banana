@@ -43,6 +43,13 @@ prod.env
 ADMIN-BOOTSTRAP*
 ADMIN-BOOTSTRAP.local.txt
 
+# Personal VPS-only (keep on disk, not in org/personal git)
+deploy/server-bootstrap.sh
+deploy/patch-minio-images.py
+deploy/nginx/ooneclickk.ru.conf
+deploy/nginx/storage.ooneclickk.ru.conf
+deploy/nginx/uploader.ooneclickk.ru.conf
+
 # Временные файлы
 *.tmp
 *.bak
