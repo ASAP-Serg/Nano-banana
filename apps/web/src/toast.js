@@ -71,30 +71,73 @@ function downloadFileUrl(imageUrl) {
   return imageUrl;
 }
 
+function downloadFilename(prompt) {
+  const sanitized = (prompt || "image")
+    .substring(0, 50)
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/\s+/g, "_")
+    .toLowerCase();
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, "").replace("T", "_");
+  return `nano_banana_${sanitized}_${timestamp}.jpg`;
+}
+
+function triggerBlobDownload(blob, prompt) {
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = downloadFilename(prompt);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+async function blobFromCdn(cdnUrl) {
+  const response = await fetch(cdnUrl, {
+    credentials: "omit",
+    mode: "cors",
+    referrerPolicy: "no-referrer",
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.blob();
+}
+
 export async function downloadImage(imageUrl, prompt) {
   if (!isSafeMediaUrl(imageUrl)) {
     toast("Некорректная ссылка на изображение", "error");
     return;
   }
   try {
-    // Same-origin proxy (?download=1) — avoids CORS cancel on Moonez CDN 302.
-    const response = await fetch(downloadFileUrl(imageUrl), { credentials: "include" });
+    // Auth on our /file?download=1: MinIO bytes, or JSON {url} for Moonez CDN.
+    const response = await fetch(downloadFileUrl(imageUrl), {
+      credentials: "include",
+      headers: { Accept: "application/json,image/*,*/*" },
+    });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const sanitized = (prompt || "image")
-      .substring(0, 50)
-      .replace(/[^\p{L}\p{N}\s-]/gu, "")
-      .replace(/\s+/g, "_")
-      .toLowerCase();
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, "").replace("T", "_");
-    a.download = `nano_banana_${sanitized}_${timestamp}.jpg`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    let blob;
+    if (contentType.includes("application/json")) {
+      const payload = await response.json();
+      const cdnUrl = typeof payload?.url === "string" ? payload.url : "";
+      if (!/^https?:\/\//i.test(cdnUrl)) throw new Error("Нет ссылки на файл");
+      try {
+        blob = await blobFromCdn(cdnUrl);
+      } catch (cdnErr) {
+        // CORS/extension block — open CDN tab so user can save natively.
+        window.open(cdnUrl, "_blank", "noopener,noreferrer");
+        toast("Открыл оригинал — сохрани через браузер");
+        try {
+          const { reportError } = await import("./errorReporter.js");
+          reportError(cdnErr, "download-cdn", { path: cdnUrl.slice(0, 300) });
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+    } else {
+      blob = await response.blob();
+    }
+    triggerBlobDownload(blob, prompt);
     toast("Изображение скачано");
   } catch (err) {
     try {
