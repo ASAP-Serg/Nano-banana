@@ -431,22 +431,52 @@ def _load_accessible_generation(session, generation_id: int, user: TokenPayload)
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 
 
-def _media_bytes_response(data: bytes, content_type: str) -> Response:
+def _media_bytes_response(data: bytes, content_type: str, *, download: bool = False) -> Response:
+    disposition = "attachment" if download else "inline"
+    filename = '; filename="nano-banana.jpg"' if download else ""
     return Response(
         content=data,
-        media_type=content_type,
+        media_type=content_type or "image/jpeg",
         headers={
             "Cache-Control": "private, max-age=60",
             "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": "inline",
+            "Content-Disposition": f"{disposition}{filename}",
         },
     )
+
+
+def _proxy_provider_image(provider_url: str) -> tuple[bytes, str]:
+    import requests
+    from nano_banana.security import assert_safe_outbound_image_url
+
+    assert_safe_outbound_image_url(provider_url, settings)
+    resp = requests.get(provider_url, timeout=(8, 60), stream=True)
+    try:
+        if resp.status_code != 200:
+            raise ValueError(f"HTTP {resp.status_code}")
+        chunks: list[bytes] = []
+        total = 0
+        max_bytes = 25 * 1024 * 1024
+        for chunk in resp.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > max_bytes:
+                raise ValueError("image too large")
+            chunks.append(chunk)
+        content_type = (resp.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
+        if not content_type.startswith("image/"):
+            content_type = "image/jpeg"
+        return b"".join(chunks), content_type
+    finally:
+        resp.close()
 
 
 @router.get("/{generation_id}/file")
 async def get_generation_file(
     generation_id: int,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
+    download: bool = False,
 ):
     check_rate_limit(
         "media-file",
@@ -465,7 +495,7 @@ async def get_generation_file(
     if source:
         try:
             data, content_type = _storage().get_object_bytes(source)
-            return _media_bytes_response(data, content_type)
+            return _media_bytes_response(data, content_type, download=download)
         except (FileNotFoundError, ValueError):
             # MinIO ещё нет — ниже fallback на CDN провайдера.
             pass
@@ -476,7 +506,14 @@ async def get_generation_file(
             assert_safe_outbound_image_url(provider_url, settings)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
-        # Браузер качает с CDN напрямую (с домашнего ISP быстро; с RU VPS — нет).
+        if download:
+            # Same-origin blob download — browser CORS can't follow CDN 302 with cookies.
+            try:
+                data, content_type = _proxy_provider_image(provider_url)
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail="Не удалось скачать с CDN") from exc
+            return _media_bytes_response(data, content_type, download=True)
+        # Preview: browser loads CDN directly (home ISP is faster than RU VPS hop).
         return RedirectResponse(url=provider_url, status_code=302)
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 

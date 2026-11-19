@@ -427,15 +427,16 @@ export default function App() {
     try {
       const gen = await api.adminGeneration(id);
       const mosaic = gen.generation_mode === "mosaic" || gen.mosaic || gen.mosaic_kind;
-      const refs = [];
-      if (!mosaic && gen.result_url) refs.push(gen.result_url);
-      for (const url of gen.reference_images || []) {
-        if (url && !refs.includes(url) && refs.length < 4) refs.push(url);
-      }
+      const refs = Array.isArray(gen.reference_images) ? gen.reference_images.filter(Boolean).slice(0, 4) : [];
       generateRef.current?.applyGeneration({
         ...gen,
-        reference_images: mosaic ? gen.reference_images || [] : refs.length ? refs : gen.reference_images,
-        generation_mode: mosaic ? "mosaic" : refs.length ? "image-to-image" : gen.generation_mode,
+        // Only original refs — never shove the result image into the form.
+        reference_images: refs,
+        generation_mode: mosaic
+          ? "mosaic"
+          : refs.length
+            ? "image-to-image"
+            : gen.generation_mode || "text-to-image",
       });
       document.getElementById("generate-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (err) {

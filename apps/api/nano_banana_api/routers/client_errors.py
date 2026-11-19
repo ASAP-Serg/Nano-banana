@@ -20,7 +20,7 @@ logger = logging.getLogger("nano_banana.client_errors")
 router = APIRouter(prefix="/client-errors", tags=["client-errors"])
 
 _REDIS_KEY = "nano_banana:client_errors"
-_MAX_STORE = 200
+_MAX_STORE = 500
 _MAX_MSG = 800
 _MAX_STACK = 4000
 
@@ -89,7 +89,7 @@ async def recent_client_errors(
         from fastapi import HTTPException
 
         raise HTTPException(status_code=403, detail="Доступ только для админов")
-    limit = max(1, min(int(limit or 50), 100))
+    limit = max(1, min(int(limit or 50), 200))
     try:
         client = get_job_queue().client
         rows = client.lrange(_REDIS_KEY, 0, limit - 1) or []

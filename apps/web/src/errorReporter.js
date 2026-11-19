@@ -1,8 +1,8 @@
-/** Lightweight browser → API error reporter (deduped, no loops). */
+/** Silent browser → API error collector (deduped, no UI, no loops). */
 
 const ENDPOINT = "/api/v1/client-errors";
-const DEDUPE_MS = 15_000;
-const MAX_QUEUE = 20;
+const DEDUPE_MS = 8_000;
+const MAX_QUEUE = 40;
 
 const seen = new Map();
 let queue = [];
@@ -20,7 +20,7 @@ function shouldSend(payload) {
   const prev = seen.get(key) || 0;
   if (now - prev < DEDUPE_MS) return false;
   seen.set(key, now);
-  if (seen.size > 200) {
+  if (seen.size > 400) {
     for (const [k, t] of seen) {
       if (now - t > DEDUPE_MS * 4) seen.delete(k);
     }
@@ -103,9 +103,24 @@ export function installErrorReporter() {
   window.__nbErrorReporterInstalled = true;
 
   window.addEventListener("error", (ev) => {
+    if (ev.target && ev.target !== window && (ev.target.src || ev.target.href)) {
+      const tag = (ev.target.tagName || "resource").toLowerCase();
+      const src = ev.target.src || ev.target.href || "";
+      reportError(`${tag} load failed`, "resource", { path: String(src).slice(0, 300) });
+      return;
+    }
     reportError(ev.error || ev.message, "error");
-  });
+  }, true);
+
   window.addEventListener("unhandledrejection", (ev) => {
     reportError(ev.reason || "unhandledrejection", "unhandledrejection");
+  });
+
+  document.addEventListener("securitypolicyviolation", (ev) => {
+    reportError(
+      `${ev.violatedDirective || "csp"} blocked ${ev.blockedURI || ""}`.trim(),
+      "csp",
+      { path: String(ev.documentURI || location.href).slice(0, 300), status: ev.statusCode || null }
+    );
   });
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
-import { copyText, formatUsd, isSafeMediaUrl, shortJobId, toast } from "../toast.js";
-import { IconToForm } from "../icons.jsx";
+import { copyText, downloadImage, formatUsd, isSafeMediaUrl, shortJobId, toast } from "../toast.js";
+import { IconDownload, IconToForm } from "../icons.jsx";
 import Lightbox from "./Lightbox.jsx";
 import Modal from "./Modal.jsx";
 
@@ -39,6 +39,7 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
   const [pendingOnly, setPendingOnly] = useState(false);
   const [mosaicPrompts, setMosaicPrompts] = useState(null);
   const [browserErrors, setBrowserErrors] = useState([]);
+  const [showBrowserErrors, setShowBrowserErrors] = useState(false);
   const pageSize = 24;
 
   function askPassword(title) {
@@ -99,7 +100,7 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
 
   async function loadBrowserErrors() {
     try {
-      const d = await api.clientErrorsRecent(40);
+      const d = await api.clientErrorsRecent(100);
       setBrowserErrors(d.items || []);
     } catch {
       setBrowserErrors([]);
@@ -543,57 +544,80 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
                         ) : null}
                       </div>
                       <div className="text-muted">{g.prompt}</div>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-primary mt-2 d-inline-flex align-items-center gap-2"
-                        onClick={() => onInsertToForm(g.id)}
-                      >
-                        <IconToForm />
-                        В форму
-                      </button>
+                      <div className="d-flex flex-wrap gap-1 mt-2">
+                        {g.result_url && isSafeMediaUrl(g.result_url) ? (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-success d-inline-flex align-items-center gap-2"
+                            onClick={() => downloadImage(g.result_url, g.prompt)}
+                          >
+                            <IconDownload />
+                            Скачать
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-2"
+                          onClick={() => onInsertToForm(g.id)}
+                        >
+                          <IconToForm />
+                          В форму
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
             <div className="d-flex justify-content-between align-items-center mt-4 mb-2">
-              <h6 className="mb-0">Ошибки браузера</h6>
-              <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadBrowserErrors}>
-                Обновить
+              <button
+                type="button"
+                className="btn btn-link btn-sm p-0 text-decoration-none"
+                onClick={() => setShowBrowserErrors((v) => !v)}
+              >
+                Лог браузера{browserErrors.length ? ` (${browserErrors.length})` : ""}{" "}
+                {showBrowserErrors ? "▾" : "▸"}
               </button>
+              {showBrowserErrors ? (
+                <button type="button" className="btn btn-sm btn-outline-secondary" onClick={loadBrowserErrors}>
+                  Обновить
+                </button>
+              ) : null}
             </div>
-            {browserErrors.length === 0 ? (
-              <p className="small text-muted">Пока пусто — клиент шлёт сюда JS/API сбои (без 401).</p>
-            ) : (
-              <div className="table-responsive" style={{ maxHeight: 280, overflow: "auto" }}>
-                <table className="table table-sm align-middle">
-                  <thead>
-                    <tr>
-                      <th>Когда</th>
-                      <th>Источник</th>
-                      <th>Сообщение</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {browserErrors.map((e, i) => (
-                      <tr key={`${e.ts || 0}-${i}`}>
-                        <td className="small text-nowrap">
-                          {e.ts ? new Date(e.ts * 1000).toLocaleString() : "—"}
-                        </td>
-                        <td className="small">
-                          {e.source}
-                          {e.status ? ` ${e.status}` : ""}
-                          {e.path ? ` ${e.path}` : ""}
-                        </td>
-                        <td className="small" title={e.stack || ""}>
-                          {(e.message || "").slice(0, 160)}
-                        </td>
+            {showBrowserErrors ? (
+              browserErrors.length === 0 ? (
+                <p className="small text-muted mb-0">Пусто — клиент тихо пишет JS/API/CSP/download сбои (без 401).</p>
+              ) : (
+                <div className="table-responsive" style={{ maxHeight: 320, overflow: "auto" }}>
+                  <table className="table table-sm align-middle mb-0">
+                    <thead>
+                      <tr>
+                        <th>Когда</th>
+                        <th>Источник</th>
+                        <th>Сообщение</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody>
+                      {browserErrors.map((e, i) => (
+                        <tr key={`${e.ts || 0}-${i}`}>
+                          <td className="small text-nowrap">
+                            {e.ts ? new Date(e.ts * 1000).toLocaleString() : "—"}
+                          </td>
+                          <td className="small">
+                            {e.source}
+                            {e.status ? ` ${e.status}` : ""}
+                            {e.path ? ` ${e.path}` : ""}
+                          </td>
+                          <td className="small" title={e.stack || ""}>
+                            {(e.message || "").slice(0, 200)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            ) : null}
           </div>
         </div>
       </div>

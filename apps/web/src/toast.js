@@ -58,22 +58,17 @@ export function isSafeMediaUrl(url) {
   }
 }
 
-async function fetchDownloadBlob(imageUrl) {
-  // /file may 302 to Moonez CDN (Allow-Origin: *). Following that redirect
-  // with credentials:include is blocked by browsers — resolve Location ourselves.
-  const first = await fetch(imageUrl, { credentials: "include", redirect: "manual" });
-  if (first.status >= 300 && first.status < 400) {
-    const location = first.headers.get("Location");
-    if (!location) throw new Error(`HTTP ${first.status}`);
-    const cdn = await fetch(location, { credentials: "omit", mode: "cors", redirect: "follow" });
-    if (!cdn.ok) throw new Error(`HTTP ${cdn.status}`);
-    return cdn.blob();
+function downloadFileUrl(imageUrl) {
+  try {
+    const u = new URL(imageUrl, window.location.origin);
+    if (/^\/api\/v1\/images\/\d+\/file\/?$/.test(u.pathname)) {
+      u.searchParams.set("download", "1");
+      return `${u.pathname}${u.search}`;
+    }
+  } catch {
+    /* fall through */
   }
-  if (first.type === "opaqueredirect") {
-    throw new Error("Не удалось скачать изображение");
-  }
-  if (!first.ok) throw new Error(`HTTP ${first.status}`);
-  return first.blob();
+  return imageUrl;
 }
 
 export async function downloadImage(imageUrl, prompt) {
@@ -82,7 +77,10 @@ export async function downloadImage(imageUrl, prompt) {
     return;
   }
   try {
-    const blob = await fetchDownloadBlob(imageUrl);
+    // Same-origin proxy (?download=1) — avoids CORS cancel on Moonez CDN 302.
+    const response = await fetch(downloadFileUrl(imageUrl), { credentials: "include" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -99,6 +97,12 @@ export async function downloadImage(imageUrl, prompt) {
     window.URL.revokeObjectURL(url);
     toast("Изображение скачано");
   } catch (err) {
+    try {
+      const { reportError } = await import("./errorReporter.js");
+      reportError(err, "download", { path: String(imageUrl || "").slice(0, 300) });
+    } catch {
+      /* ignore */
+    }
     toast(err.message || "Не удалось скачать изображение", "error");
   }
 }
