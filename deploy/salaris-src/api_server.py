@@ -526,6 +526,51 @@ def process_from_sheet():
                         report_spread = client.open_by_key(_spreadsheet_id)
                         report_sheet_id = report_ws.id
                         report_ws.batch_clear(["A2:H500"])
+                        # Шапка: строка N в REPORT = строка N в NoStatus.
+                        # D–F пишет BigQuery; G–H пишет Salaris (Да/Нет + ошибка). Цвет = итог.
+                        try:
+                            report_ws.update(
+                                "A1:H2",
+                                [
+                                    [
+                                        "REPORT = лог Salaris",
+                                        "строка N = NoStatus N",
+                                        "не править руками",
+                                        "item_ids (BQ)",
+                                        "кол-во id",
+                                        "источник BQ",
+                                        "статус сменён?",
+                                        "ошибка / комментарий",
+                                    ],
+                                    [
+                                        "зелёный = ок",
+                                        "жёлтый = ошибка",
+                                        "красный = не сменился",
+                                        "",
+                                        "",
+                                        "",
+                                        "Да / Нет",
+                                        "текст от Selenium",
+                                    ],
+                                ],
+                                value_input_option="USER_ENTERED",
+                            )
+                            try:
+                                report_spread.batch_update({
+                                    "requests": [{
+                                        "updateSheetProperties": {
+                                            "properties": {
+                                                "sheetId": report_sheet_id,
+                                                "gridProperties": {"frozenRowCount": 2},
+                                            },
+                                            "fields": "gridProperties.frozenRowCount",
+                                        }
+                                    }]
+                                })
+                            except Exception as ex:
+                                print(f"Ошибка freeze REPORT: {ex}")
+                        except Exception as ex:
+                            print(f"Ошибка шапки REPORT: {ex}")
                         if valid_results:
                             min_r, max_r = min(r["row_index"] for r in valid_results), max(r["row_index"] for r in valid_results)
                             report_data = []
