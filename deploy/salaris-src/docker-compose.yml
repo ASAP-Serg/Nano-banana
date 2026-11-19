@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    container_name: salaris-api
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+      - "5900:5900"   # VNC: подключись к серверу:5900, чтобы смотреть сессию Chrome
+    env_file:
+      - .env
+    volumes:
+      # Монтируем .env для обновления без пересборки (опционально)
+      - ./.env:/app/.env:ro
+      # Постоянный профиль Chrome между перезапусками контейнера
+      - ./chrome-user-data:/data/chrome-user-data
+    # Если .env нет, переменные берутся из environment или из системы
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+

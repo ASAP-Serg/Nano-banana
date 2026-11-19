@@ -1,0 +1,11 @@
+# Только для второго этапа: API + Selenium (Mosaica)
+python-dotenv>=1.0.0
+flask>=2.3.0
+flask-cors>=4.0.0
+gunicorn>=21.2.0
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+requests>=2.31.0
+# Чтение/запись Google Таблицы с сервера (креды бота)
+gspread>=6.0.0
+google-auth>=2.23.0

@@ -1,0 +1,30 @@
+# Деплой на сервер при пуше: git pull + docker-compose up --build
+name: Deploy to server
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_BRANCH: ${{ github.ref_name }}
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.BEGET_HOST }}
+          username: ${{ secrets.BEGET_USERNAME }}
+          key: ${{ secrets.BEGET_SSH_KEY }}
+          port: ${{ secrets.BEGET_SSH_PORT }}
+          envs: DEPLOY_BRANCH
+          script: |
+            set -e
+            cd ${{ secrets.BEGET_DEPLOY_PATH }} || { echo "Папка деплоя не найдена"; exit 1; }
+            git fetch origin
+            git reset --hard origin/$DEPLOY_BRANCH
+            docker-compose down
+            docker-compose up -d --build
+            docker-compose ps

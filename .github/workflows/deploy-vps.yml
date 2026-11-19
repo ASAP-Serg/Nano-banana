@@ -127,22 +127,15 @@ jobs:
               sudo systemctl enable --now php8.3-fpm 2>/dev/null || sudo systemctl restart php*-fpm 2>/dev/null || true
             fi
 
-            # Salaris API (Mosaica No-status Selenium) — https://ooneclickk.ru/salaris
-            # Repo is private: optional GH_CLONE_TOKEN secret (PAT with repo read).
+            # Salaris API (vendored from ASAP-Serg/SalarisDisabledRemover) → https://ooneclickk.ru/salaris
             SALARIS_DIR=/srv/salaris-api
-            CLONE_URL="https://github.com/ASAP-Serg/SalarisDisabledRemover.git"
-            if [ -n "${{ secrets.GH_CLONE_TOKEN }}" ]; then
-              CLONE_URL="https://x-access-token:${{ secrets.GH_CLONE_TOKEN }}@github.com/ASAP-Serg/SalarisDisabledRemover.git"
-            fi
             set +e
-            if [ ! -d "$SALARIS_DIR/.git" ]; then
+            if [ -d deploy/salaris-src ]; then
               sudo mkdir -p "$SALARIS_DIR"
-              sudo git clone "$CLONE_URL" "$SALARIS_DIR"
-            fi
-            if [ -d "$SALARIS_DIR/.git" ]; then
-              sudo git -C "$SALARIS_DIR" remote set-url origin "$CLONE_URL" 2>/dev/null
-              sudo git -C "$SALARIS_DIR" fetch origin
-              sudo git -C "$SALARIS_DIR" reset --hard origin/master
+              # Keep server .env and chrome profile across deploys.
+              sudo rsync -a --delete \
+                --exclude '.env' --exclude 'chrome-user-data/' --exclude '.git/' \
+                deploy/salaris-src/ "$SALARIS_DIR/"
               if [ ! -f "$SALARIS_DIR/.env" ]; then
                 if [ -f deploy/salaris.env.example ]; then
                   sudo cp deploy/salaris.env.example "$SALARIS_DIR/.env"
@@ -172,7 +165,7 @@ jobs:
                 sudo nginx -t && sudo systemctl reload nginx || true
               fi
             else
-              echo "WARN: Salaris repo not cloned (private?). Add GH_CLONE_TOKEN or clone manually to $SALARIS_DIR"
+              echo "WARN: deploy/salaris-src missing"
             fi
             set -e
 
