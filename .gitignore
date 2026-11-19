@@ -48,7 +48,8 @@ deploy/server-bootstrap.sh
 deploy/patch-minio-images.py
 deploy/nginx/ooneclickk.ru.conf
 deploy/nginx/storage.ooneclickk.ru.conf
-deploy/nginx/uploader.ooneclickk.ru.conf
+# uploader.ooneclickk.ru.conf is tracked (PHP+static deploy)
+
 
 # Временные файлы
 *.tmp

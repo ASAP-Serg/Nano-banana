@@ -89,20 +89,41 @@ jobs:
               exit 1
             fi
 
-            # Clicker static images → uploader.ooneclickk.ru/tsum-images/
-            if [ -d deploy/uploader-static/tsum-images ]; then
-              sudo mkdir -p /var/www/uploader/tsum-images
-              sudo rsync -a --delete deploy/uploader-static/tsum-images/ /var/www/uploader/tsum-images/
-              sudo chown -R root:root /var/www/uploader
-              sudo find /var/www/uploader -type d -exec chmod 755 {} \;
-              sudo find /var/www/uploader -type f -exec chmod 644 {} \;
-              echo "Uploader static synced:"
-              ls -la /var/www/uploader/tsum-images
+            # PHP uploader app + clicker static → /var/www/uploader
+            sudo mkdir -p /var/www/uploader/tsum-images /var/www/uploader/files /var/www/uploader/jobs
+            if [ -d deploy/uploader-app ]; then
+              sudo apt-get update -y
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                php-fpm php-cli php-curl php-gd php-mbstring php-xml php-zip
+              # Prefer 8.3 sock; fall back to whatever php-fpm provides.
+              PHP_SOCK="$(ls /run/php/php*-fpm.sock 2>/dev/null | head -n1 || true)"
+              if [ -n "$PHP_SOCK" ] && [ -f deploy/nginx/uploader.ooneclickk.ru.conf ]; then
+                sudo sed "s#unix:/run/php/php8.3-fpm.sock#unix:${PHP_SOCK}#" \
+                  deploy/nginx/uploader.ooneclickk.ru.conf \
+                  | sudo tee /etc/nginx/sites-available/uploader.ooneclickk.ru >/dev/null
+                sudo ln -sfn /etc/nginx/sites-available/uploader.ooneclickk.ru \
+                  /etc/nginx/sites-enabled/uploader.ooneclickk.ru
+              fi
+              sudo rsync -a \
+                --exclude 'files/' --exclude 'jobs/' --exclude 'tsum-images/' \
+                deploy/uploader-app/ /var/www/uploader/
+              sudo mkdir -p /var/www/uploader/files /var/www/uploader/jobs
             fi
+            if [ -d deploy/uploader-static/tsum-images ]; then
+              sudo rsync -a --delete deploy/uploader-static/tsum-images/ /var/www/uploader/tsum-images/
+            fi
+            sudo chown -R www-data:www-data /var/www/uploader/files /var/www/uploader/jobs
+            sudo chown -R root:root /var/www/uploader/tsum-images
+            sudo find /var/www/uploader -type d -exec chmod 755 {} \;
+            sudo find /var/www/uploader -type f -exec chmod 644 {} \;
+            sudo chmod 775 /var/www/uploader/files /var/www/uploader/jobs
+            echo "Uploader tree:"
+            ls -la /var/www/uploader | head -30
 
             # Host nginx configs live on the VPS (not in git). Reload if present.
             if command -v nginx >/dev/null 2>&1; then
               sudo nginx -t && sudo systemctl reload nginx || true
+              sudo systemctl enable --now php*-fpm 2>/dev/null || sudo systemctl restart php8.3-fpm 2>/dev/null || true
             fi
 
             echo "Deploy OK ${{ github.sha }}"
