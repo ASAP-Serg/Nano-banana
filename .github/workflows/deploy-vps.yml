@@ -13,12 +13,18 @@ jobs:
     steps:
       - name: Deploy to AdminVPS
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          SALARIS_API_KEY: ${{ secrets.SALARIS_API_KEY }}
+          SALARIS_MOSAICA_EMAIL: ${{ secrets.SALARIS_MOSAICA_EMAIL }}
+          SALARIS_MOSAICA_PASSWORD: ${{ secrets.SALARIS_MOSAICA_PASSWORD }}
+          SALARIS_GOOGLE_SHEETS_CREDENTIALS: ${{ secrets.SALARIS_GOOGLE_SHEETS_CREDENTIALS }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: 22
           command_timeout: 45m
+          envs: SALARIS_API_KEY,SALARIS_MOSAICA_EMAIL,SALARIS_MOSAICA_PASSWORD,SALARIS_GOOGLE_SHEETS_CREDENTIALS
           script: |
             set -euo pipefail
             APP_DIR="${{ secrets.DEPLOY_PATH }}"
@@ -136,13 +142,42 @@ jobs:
               sudo rsync -a --delete \
                 --exclude '.env' --exclude 'chrome-user-data/' --exclude '.git/' \
                 deploy/salaris-src/ "$SALARIS_DIR/"
-              if [ ! -f "$SALARIS_DIR/.env" ]; then
+              # Prefer GitHub Secrets → /srv/salaris-api/.env (no manual SSH).
+              if [ -n "${SALARIS_API_KEY:-}" ]; then
+                python3 - <<'PY'
+import os
+from pathlib import Path
+
+def esc(v: str) -> str:
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+
+lines = [
+    f"API_KEY={esc(os.environ.get('SALARIS_API_KEY', ''))}",
+    "PROCESS_API_URL=https://ooneclickk.ru/salaris",
+    "PORT=5000",
+    "DEBUG=False",
+    "HEADLESS=false",
+    "CHROME_USER_DATA_DIR=/data/chrome-user-data",
+    f"MOSAICA_EMAIL={esc(os.environ.get('SALARIS_MOSAICA_EMAIL', ''))}",
+    f"MOSAICA_PASSWORD={esc(os.environ.get('SALARIS_MOSAICA_PASSWORD', ''))}",
+]
+creds = (os.environ.get("SALARIS_GOOGLE_SHEETS_CREDENTIALS") or "").strip()
+if creds:
+    lines.append(f"GOOGLE_SHEETS_CREDENTIALS={esc(creds)}")
+Path("/tmp/salaris.env").write_text("\n".join(lines) + "\n", encoding="utf-8")
+print("Wrote /tmp/salaris.env from GitHub Secrets")
+PY
+                sudo mv /tmp/salaris.env "$SALARIS_DIR/.env"
+                sudo chmod 600 "$SALARIS_DIR/.env"
+                sudo chown root:root "$SALARIS_DIR/.env"
+                echo "Salaris .env synced from GitHub Secrets"
+              elif [ ! -f "$SALARIS_DIR/.env" ]; then
                 if [ -f deploy/salaris.env.example ]; then
                   sudo cp deploy/salaris.env.example "$SALARIS_DIR/.env"
                 elif [ -f "$SALARIS_DIR/.env.example" ]; then
                   sudo cp "$SALARIS_DIR/.env.example" "$SALARIS_DIR/.env"
                 fi
-                echo "WARN: fill $SALARIS_DIR/.env (MOSAICA_*, API_KEY, GOOGLE_SHEETS_CREDENTIALS)"
+                echo "WARN: set GitHub Secrets SALARIS_* then redeploy (see deploy/salaris.env.example)"
               fi
               if [ -f deploy/nginx/salaris-proxy.snippet.conf ]; then
                 sudo cp deploy/nginx/salaris-proxy.snippet.conf /etc/nginx/snippets/salaris-proxy.conf
