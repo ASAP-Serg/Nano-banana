@@ -15,6 +15,14 @@ function cardStatus(item) {
   return null;
 }
 
+function emptyThumbLabel(item) {
+  if (item.status === "failed") return item.error_message || "ошибка";
+  if (item.status === "paused") return item.status_detail || "пауза";
+  if (item.status === "running") return item.status_detail || "генерация…";
+  if (item.status === "pending") return item.status_detail || "очередь…";
+  return item.status_detail || item.status || "нет фото";
+}
+
 function retryWord(n) {
   if (n === 1) return "ретрай";
   if (n >= 2 && n <= 4) return "ретрая";
@@ -74,7 +82,7 @@ export default function Gallery({
                       {item.status === "pending" || item.status === "running" ? (
                         <div className="spinner-border" role="status" />
                       ) : null}
-                      <div className="mt-2">{statusLabel(item)}</div>
+                      <div className="mt-2">{emptyThumbLabel(item)}</div>
                     </div>
                   )}
                 </div>
