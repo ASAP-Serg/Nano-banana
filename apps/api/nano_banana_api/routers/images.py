@@ -224,11 +224,13 @@ async def generate_image(
             session.refresh(generation)
             generation_id = generation.id
 
-            if body.reference_images:
+            # Text-to-image must never keep stale refs from the UI.
+            refs_in = body.reference_images if body.generation_mode != "text-to-image" else []
+            if refs_in:
                 try:
                     reference_image_urls = store_reference_images(
                         _storage(),
-                        body.reference_images,
+                        refs_in,
                         user.user_id,
                         allow_any_owner=bool(user.is_admin and user.totp_enabled),
                     )
@@ -242,6 +244,9 @@ async def generate_image(
                 session.commit()
 
         queued = _queue_payload(body, reference_image_urls)
+        if body.generation_mode == "text-to-image":
+            queued["reference_images"] = []
+            queued["generation_mode"] = "text-to-image"
         queued["prompt"] = job_prompt
         get_job_queue().enqueue(generation_id, user.user_id, queued)
         return ImageGenerationResponse(

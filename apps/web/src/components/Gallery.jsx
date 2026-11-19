@@ -104,9 +104,22 @@ export default function Gallery({
                             (item.status !== "failed" && item.estimated_cost_usd != null)) &&
                             " · "}
                           {formatDurationSeconds(item.site_ready_seconds)} до скачивания
-                          <span className="text-muted" title="У Moonez «обработка» — только GPU. Наше время включает их очередь queued.">
+                          <span
+                            className="text-muted"
+                            title="У Moonez «обработка» — только GPU. Наше время включает их очередь и наши ретраи."
+                          >
                             {" "}
-                            (с их очередью)
+                            (с их очередью
+                            {Number(item.retry_count) > 0
+                              ? `, ${item.retry_count} ${
+                                  Number(item.retry_count) === 1
+                                    ? "ретрай"
+                                    : Number(item.retry_count) < 5
+                                      ? "ретрая"
+                                      : "ретраев"
+                                }`
+                              : ""}
+                            )
                           </span>
                         </>
                       )}

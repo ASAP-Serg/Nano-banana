@@ -322,6 +322,7 @@ const GenerateForm = forwardRef(function GenerateForm({
       });
       return;
     }
+    const useRefs = mode === "image-to-image";
     await onGenerate({
       prompt,
       negative_prompt: negative || null,
@@ -333,7 +334,8 @@ const GenerateForm = forwardRef(function GenerateForm({
       num_inference_steps: Number(steps),
       seed: seed === "" ? null : Number(seed),
       rewrite_prompt: rewrite,
-      reference_images: refs.map((r) => r.dataUrl),
+      // Text-to-image must not keep stale refs from the other tab.
+      reference_images: useRefs ? refs.map((r) => r.dataUrl) : [],
     });
   }
 
@@ -348,7 +350,11 @@ const GenerateForm = forwardRef(function GenerateForm({
             <button
               type="button"
               className={`btn ${mode === "text-to-image" ? "btn-primary" : "btn-outline-primary"}`}
-              onClick={() => setMode("text-to-image")}
+              onClick={() => {
+                setMode("text-to-image");
+                setRefs([]);
+                setMosaicRefs([null, null, null, null]);
+              }}
             >
               Text-to-Image
             </button>
