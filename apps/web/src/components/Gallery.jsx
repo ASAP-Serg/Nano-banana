@@ -1,26 +1,18 @@
 import {
-  copyText,
   downloadImage,
   formatDurationSeconds,
   formatUsd,
   isSafeMediaUrl,
-  shortJobId,
   toast,
 } from "../toast.js";
 import { IconButton, IconDownload, IconInfo, IconRefresh, IconToForm, IconTrash } from "../icons.jsx";
 
-function statusLabel(item) {
-  if (item.status === "failed") return item.error_message || "ошибка";
-  if (item.status === "paused") return item.status_detail || "пауза у Moonez";
-  if (item.status === "completed") {
-    if (item.persist_pending) return item.status_detail || "готово · сохраняем копию";
-    return "готово";
-  }
-  if (item.status === "pending") return item.status_detail || "в нашей очереди…";
-  if (item.status === "running") {
-    return item.status_detail || "ждём Moonez…";
-  }
-  return item.status_detail || item.status;
+function cardStatus(item) {
+  if (item.status === "failed") return "ошибка";
+  if (item.status === "paused") return "пауза";
+  if (item.status === "running") return "генерация";
+  if (item.status === "pending") return "очередь";
+  return null;
 }
 
 function retryWord(n) {
@@ -97,29 +89,10 @@ export default function Gallery({
                       : item.prompt}
                   </p>
                   <div className="gallery-meta">
-                    <div className="gallery-meta__row">
-                      <span className="gallery-meta__id">#{item.id}</span>
+                    <div className="gallery-meta__row gallery-meta__stats">
                       <span className="gallery-meta__model" title={item.model_name || ""}>
                         {shortModelName(item.model_name)}
                       </span>
-                      <span
-                        className={`gallery-meta__status gallery-meta__status--${item.status || "unknown"}`}
-                        title={statusLabel(item)}
-                      >
-                        {item.status === "completed" && item.persist_pending
-                          ? "сохраняем"
-                          : item.status === "completed"
-                            ? "готово"
-                            : item.status === "failed"
-                              ? "ошибка"
-                              : item.status === "running"
-                                ? "Moonez"
-                                : item.status === "pending"
-                                  ? "очередь"
-                                  : statusLabel(item)}
-                      </span>
-                    </div>
-                    <div className="gallery-meta__row gallery-meta__stats">
                       {item.provider_cost_usd != null ? (
                         <span className="gallery-meta__price">{formatUsd(item.provider_cost_usd)}</span>
                       ) : item.status !== "failed" && item.estimated_cost_usd != null ? (
@@ -130,7 +103,7 @@ export default function Gallery({
                       {item.site_ready_seconds != null ? (
                         <span
                           className="gallery-meta__time"
-                          title="Клик → скачать. Включает очередь Moonez и наши ретраи."
+                          title="До появления картинки на сайте (очередь + генерация + ретраи)"
                         >
                           {formatDurationSeconds(item.site_ready_seconds)}
                         </span>
@@ -140,15 +113,10 @@ export default function Gallery({
                           {item.retry_count} {retryWord(Number(item.retry_count))}
                         </span>
                       ) : null}
-                      {item.provider_job_id ? (
-                        <button
-                          type="button"
-                          className="btn btn-link btn-sm p-0 gallery-meta__job"
-                          title="Скопировать id задачи Moonez"
-                          onClick={() => copyText(item.provider_job_id, "Moonez job id")}
-                        >
-                          {shortJobId(item.provider_job_id)}
-                        </button>
+                      {cardStatus(item) ? (
+                        <span className={`gallery-meta__status gallery-meta__status--${item.status}`}>
+                          {cardStatus(item)}
+                        </span>
                       ) : null}
                     </div>
                   </div>
