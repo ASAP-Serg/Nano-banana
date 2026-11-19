@@ -77,8 +77,13 @@ def mark_success() -> None:
 
 
 def mark_upstream_degraded(error_message: str) -> None:
+    from nano_banana.providers.errors import is_bananalab_queue_timeout_message
+
     now = _now_iso()
     count = int(_get("upstream_error_count") or 0) + 1
+    # Queue timeout = Moonez already broken; don't wait for a second failure to warn users.
+    if is_bananalab_queue_timeout_message(error_message):
+        count = max(count, BANANALAB_UPSTREAM_DEGRADED_MIN_ERRORS)
     fields = {
         "last_upstream_error_at": now,
         "last_upstream_error_message": (error_message or "")[:500],

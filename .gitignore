@@ -39,6 +39,9 @@ Thumbs.db
 # Prod exports / secret dumps
 deploy-export/
 prod.env
+*.local.txt
+ADMIN-BOOTSTRAP*
+ADMIN-BOOTSTRAP.local.txt
 
 # Временные файлы
 *.tmp

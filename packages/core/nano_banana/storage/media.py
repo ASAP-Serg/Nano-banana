@@ -15,6 +15,11 @@ def generation_reference_url(generation_id: int, index: int) -> str:
 def client_result_url(generation) -> Optional[str]:
     if getattr(generation, "result_path", None) or getattr(generation, "result_url", None):
         return generation_file_url(generation.id)
+    meta = getattr(generation, "generation_metadata", None) or {}
+    provider_url = meta.get("provider_image_url")
+    if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
+        # Картинка ещё качается в MinIO, но уже есть CDN URL — отдаём тот же proxy-path.
+        return generation_file_url(generation.id)
     return None
 
 

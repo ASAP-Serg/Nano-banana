@@ -17,6 +17,7 @@ class User(Base):
     hashed_password = Column(String, nullable=True)  # null = Google-only
     is_active = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False)  # Переименовано из is_superuser
+    is_superadmin = Column(Boolean, default=False)  # владелец: снимать админов / передача при удалении
     is_operator = Column(Boolean, default=False)  # Примерка мозаики, обычная генерация остаётся
     is_approved = Column(Boolean, default=False)  # админ открыл доступ к генерациям
     replicate_api_key = Column(String, nullable=True)  # API ключ пользователя (зашифрован)

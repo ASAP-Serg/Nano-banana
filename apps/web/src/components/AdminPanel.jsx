@@ -17,7 +17,8 @@ function formatAgo(iso) {
   return `${months} мес.`;
 }
 
-export default function AdminPanel({ onClose, onInsertToForm }) {
+export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
+  const isSuper = Boolean(currentUser?.is_superadmin);
   const [users, setUsers] = useState([]);
   const [gens, setGens] = useState([]);
   const [overview, setOverview] = useState(null);
@@ -289,7 +290,9 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                         <span className="badge text-bg-secondary ms-1">email?</span>
                       )}
                     </td>
-                    <td>{u.is_admin ? "да" : "нет"}</td>
+                    <td>
+                      {u.is_superadmin ? "суперадмин" : u.is_admin ? "да" : "нет"}
+                    </td>
                     <td>{u.is_operator ? "да" : "нет"}</td>
                     <td>{u.is_admin || u.is_approved ? "да" : "нет"}</td>
                     <td>{u.is_active === false ? "выкл" : "активен"}</td>
@@ -327,21 +330,25 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                             </button>
                           )
                         )}
-                        {u.is_admin ? (
+                        {u.is_superadmin ? (
+                          <span className="small text-muted align-self-center">владелец</span>
+                        ) : isSuper && u.is_admin ? (
                           <button
                             className="btn btn-sm btn-outline-warning"
                             onClick={() => runUserAction("Снять права админа", (password) => api.adminRevoke(u.id, password))}
                           >
                             Снять
                           </button>
-                        ) : (
+                        ) : isSuper && !u.is_admin ? (
                           <button
                             className="btn btn-sm btn-outline-primary"
                             onClick={() => runUserAction("Назначить админом", (password) => api.adminGrant(u.id, password))}
                           >
                             Админ
                           </button>
-                        )}
+                        ) : u.is_admin ? (
+                          <span className="small text-muted align-self-center">админ</span>
+                        ) : null}
                         {u.is_operator ? (
                           <button
                             className="btn btn-sm btn-outline-warning"
@@ -372,15 +379,17 @@ export default function AdminPanel({ onClose, onInsertToForm }) {
                             Выкл
                           </button>
                         )}
-                        <button
-                          className="btn btn-sm btn-outline-danger"
-                          onClick={() => {
-                            if (!window.confirm(`Удалить ${u.username}? Генерации и файлы тоже будут удалены.`)) return;
-                            runUserAction("Удалить пользователя", (password) => api.adminDeleteUser(u.id, password));
-                          }}
-                        >
-                          Удалить
-                        </button>
+                        {!u.is_superadmin && (
+                          <button
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={() => {
+                              if (!window.confirm(`Удалить ${u.username}? Генерации и файлы тоже будут удалены.`)) return;
+                              runUserAction("Удалить пользователя", (password) => api.adminDeleteUser(u.id, password));
+                            }}
+                          >
+                            Удалить
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

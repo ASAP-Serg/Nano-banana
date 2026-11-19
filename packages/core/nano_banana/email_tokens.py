@@ -39,6 +39,27 @@ def issue_token(session, user_id: int, purpose: str, *, hours: int) -> str:
     return raw
 
 
+def issue_verify_code(session, user_id: int, *, hours: int = 24) -> str:
+    """6-digit email confirmation code (scoped to user_id)."""
+    session.query(AuthEmailToken).filter(
+        AuthEmailToken.user_id == user_id,
+        AuthEmailToken.purpose == PURPOSE_VERIFY,
+        AuthEmailToken.used_at.is_(None),
+    ).delete(synchronize_session=False)
+    raw = f"{secrets.randbelow(1_000_000):06d}"
+    now = datetime.utcnow()
+    session.add(
+        AuthEmailToken(
+            user_id=user_id,
+            purpose=PURPOSE_VERIFY,
+            token_hash=_hash(raw),
+            expires_at=now + timedelta(hours=hours),
+            created_at=now,
+        )
+    )
+    return raw
+
+
 def consume_token(session, raw: str, purpose: str) -> Optional[int]:
     """Atomically consume a one-time token (row lock + used_at)."""
     if not raw or not str(raw).strip():
@@ -63,3 +84,28 @@ def consume_token(session, raw: str, purpose: str) -> Optional[int]:
     row.used_at = now
     session.flush()
     return int(row.user_id)
+
+
+def consume_verify_code(session, user_id: int, code: str) -> bool:
+    """Consume a 6-digit verify code for a specific user."""
+    raw = "".join(ch for ch in str(code or "") if ch.isdigit())
+    if len(raw) != 6:
+        return False
+    now = datetime.utcnow()
+    row = (
+        session.query(AuthEmailToken)
+        .filter(
+            AuthEmailToken.user_id == int(user_id),
+            AuthEmailToken.token_hash == _hash(raw),
+            AuthEmailToken.purpose == PURPOSE_VERIFY,
+            AuthEmailToken.used_at.is_(None),
+            AuthEmailToken.expires_at > now,
+        )
+        .with_for_update()
+        .first()
+    )
+    if not row or row.used_at is not None:
+        return False
+    row.used_at = now
+    session.flush()
+    return True

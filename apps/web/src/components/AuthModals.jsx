@@ -68,24 +68,52 @@ export default function AuthModals({
   onReset,
   onCompleteProfile,
   onResendVerify,
+  onVerifyCode,
   googleEnabled,
   passwordRegister = false,
   mailEnabled = false,
   trustedDeviceDays = 30,
   profileDraft,
+  initialVerifyEmail = "",
+  initialVerifyCode = "",
 }) {
   const [remember, setRemember] = useState(true);
   const [emailMode, setEmailMode] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [resetPassword, setResetPassword] = useState("");
+  const [verifyPendingEmail, setVerifyPendingEmail] = useState("");
+  const [verifyCode, setVerifyCode] = useState("");
+  const [resendBusy, setResendBusy] = useState(false);
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [registerBusy, setRegisterBusy] = useState(false);
+  const [resendNote, setResendNote] = useState("");
 
   const openAuth = showLogin || showRegister;
   const isRegister = showRegister;
 
   useEffect(() => {
     if (showLogin || showTotpComplete) setRemember(true);
-    if (showLogin || showRegister) setEmailMode(false);
-  }, [showLogin, showRegister, showTotpComplete]);
+    if (showLogin) {
+      setEmailMode(false);
+      setVerifyPendingEmail("");
+      setVerifyCode("");
+      setResendNote("");
+    }
+    if (showRegister && !initialVerifyEmail) {
+      setEmailMode(false);
+      setVerifyPendingEmail("");
+      setVerifyCode("");
+      setResendNote("");
+    }
+  }, [showLogin, showRegister, showTotpComplete, initialVerifyEmail]);
+
+  useEffect(() => {
+    if (showRegister && initialVerifyEmail) {
+      setEmailMode(true);
+      setVerifyPendingEmail(initialVerifyEmail);
+      setVerifyCode(initialVerifyCode || "");
+    }
+  }, [showRegister, initialVerifyEmail, initialVerifyCode]);
 
   useEffect(() => {
     if (showCompleteProfile && profileDraft?.suggested_username) {
@@ -94,6 +122,7 @@ export default function AuthModals({
   }, [showCompleteProfile, profileDraft]);
 
   function closeAuth() {
+    if (registerBusy || verifyBusy) return;
     if (isRegister) onCloseRegister();
     else onCloseLogin();
   }
@@ -107,7 +136,9 @@ export default function AuthModals({
             <h2 className="nb-auth-title">{isRegister ? "Создать аккаунт" : "С возвращением"}</h2>
             <p className="nb-auth-sub">
               {isRegister
-                ? "Google или email + пароль. После регистрации на email придёт ссылка подтверждения."
+                ? verifyPendingEmail
+                  ? "Введите код из письма — регистрация ещё не завершена."
+                  : "Google или email + пароль. После создания аккаунта придёт код подтверждения."
                 : "Войдите через Google или email. Новый Google-аккаунт создаётся автоматически."}
             </p>
 
@@ -125,11 +156,82 @@ export default function AuthModals({
               </button>
             ) : isRegister ? (
               passwordRegister ? (
+                verifyPendingEmail ? (
+                  <form
+                    className="nb-auth-form"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!onVerifyCode) return;
+                      setVerifyBusy(true);
+                      setResendNote("");
+                      try {
+                        await onVerifyCode(verifyPendingEmail, verifyCode);
+                      } catch (err) {
+                        setResendNote(err?.message || "Неверный код");
+                      } finally {
+                        setVerifyBusy(false);
+                      }
+                    }}
+                  >
+                    <p className="nb-auth-note" style={{ marginTop: 0 }}>
+                      Код отправлен на <b>{verifyPendingEmail}</b>. Без подтверждения войти нельзя.
+                    </p>
+                    <label className="nb-auth-label">Код из письма</label>
+                    <input
+                      className="nb-auth-input"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      placeholder="6 цифр"
+                      maxLength={6}
+                      value={verifyCode}
+                      onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      required
+                    />
+                    <button type="submit" className="nb-auth-primary" disabled={verifyBusy || verifyCode.length !== 6}>
+                      {verifyBusy ? "Проверяем…" : "Подтвердить"}
+                    </button>
+                    <button
+                      type="button"
+                      className="nb-auth-secondary"
+                      disabled={resendBusy}
+                      onClick={async () => {
+                        if (!onResendVerify) return;
+                        setResendBusy(true);
+                        setResendNote("");
+                        try {
+                          await onResendVerify(verifyPendingEmail);
+                          setResendNote("Новый код отправлен. Проверьте входящие и спам.");
+                        } catch (err) {
+                          setResendNote(err?.message || "Не удалось отправить письмо");
+                        } finally {
+                          setResendBusy(false);
+                        }
+                      }}
+                    >
+                      {resendBusy ? "Отправляем…" : "Отправить код снова"}
+                    </button>
+                    {resendNote && <p className="nb-auth-note">{resendNote}</p>}
+                  </form>
+                ) : (
                 <form
                   className="nb-auth-form"
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
-                    onRegister(e);
+                    if (registerBusy) return;
+                    const form = new FormData(e.target);
+                    const email = String(form.get("email") || "").trim();
+                    setRegisterBusy(true);
+                    setResendNote("");
+                    try {
+                      const result = await onRegister(e);
+                      if (result?.needs_verification) {
+                        setVerifyPendingEmail(email);
+                        setEmailMode(true);
+                        setResendNote("Если письма нет через минуту — нажмите «Отправить код снова».");
+                      }
+                    } finally {
+                      setRegisterBusy(false);
+                    }
                   }}
                 >
                   <label className="nb-auth-label">Имя</label>
@@ -143,20 +245,22 @@ export default function AuthModals({
                     autoComplete="username"
                     autoCapitalize="none"
                     spellCheck={false}
+                    disabled={registerBusy}
                   />
                   <label className="nb-auth-label">Email</label>
-                  <input className="nb-auth-input" name="email" type="email" placeholder="you@yandex.ru" required autoComplete="email" />
+                  <input className="nb-auth-input" name="email" type="email" placeholder="you@yandex.ru" required autoComplete="email" disabled={registerBusy} />
                   <label className="nb-auth-label">Пароль</label>
                   <PasswordField name="password" placeholder="От 10 символов" minLength={10} autoComplete="new-password" />
-                  <button type="submit" className="nb-auth-primary">
-                    Создать аккаунт
+                  <button type="submit" className="nb-auth-primary" disabled={registerBusy}>
+                    {registerBusy ? "Создаём аккаунт…" : "Создать аккаунт"}
                   </button>
                   {mailEnabled && (
                     <p className="nb-auth-note">
-                      На почту придёт ссылка подтверждения. Генерации откроет администратор после проверки.
+                      После регистрации введите 6-значный код из письма. Без подтверждения вход закрыт.
                     </p>
                   )}
                 </form>
+                )
               ) : (
                 <div className="nb-auth-note">
                   Регистрация по email временно недоступна. Используйте Google или попросите доступ у администратора.

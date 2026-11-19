@@ -88,6 +88,7 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     is_admin: bool
+    is_superadmin: bool = False
     is_operator: bool = False
     is_approved: bool = False
     totp_enabled: bool = False
@@ -110,6 +111,7 @@ class DeleteAccountRequest(BaseModel):
 
     current_password: str = ""
     confirm: str = ""
+    transfer_superadmin_to: Optional[int] = None
 
     @field_validator("confirm")
     @classmethod
@@ -156,6 +158,19 @@ class VerifyEmailRequest(BaseModel):
         if len(text) < 20:
             raise ValueError("Некорректный токен")
         return text
+
+
+class VerifyEmailCodeRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+    @field_validator("code")
+    @classmethod
+    def validate_verify_code(cls, v: str) -> str:
+        digits = "".join(ch for ch in str(v or "") if ch.isdigit())
+        if len(digits) != 6:
+            raise ValueError("Введите 6-значный код из письма")
+        return digits
 
 
 class ResendVerifyRequest(BaseModel):
@@ -429,6 +444,9 @@ class ImageResponse(BaseModel):
     provider_model: Optional[str] = None
     provider_cost_usd: Optional[float] = None
     estimated_cost_usd: Optional[float] = None
+    provider_phase: Optional[str] = None
+    status_detail: Optional[str] = None
+    persist_pending: bool = False
     mosaic: bool = False
     mosaic_kind: Optional[str] = None
     

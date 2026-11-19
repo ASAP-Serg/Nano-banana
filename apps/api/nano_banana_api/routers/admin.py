@@ -53,6 +53,12 @@ def _require_admin(user: TokenPayload):
         raise HTTPException(status_code=403, detail="Включите двухфакторную аутентификацию")
 
 
+def _require_superadmin(user: TokenPayload):
+    _require_admin(user)
+    if not bool(getattr(user, "is_superadmin", False)):
+        raise HTTPException(status_code=403, detail="Только суперадмин")
+
+
 def _rate_limit_admin_read(user_id: int, scope: str):
     check_rate_limit(
         f"admin-read:{scope}",
@@ -126,6 +132,8 @@ def _generation_full_payload(gen: Generation, username: Optional[str] = None) ->
         "mosaic_kind": metadata.get("mosaic_kind"),
         "status": gen.status,
         "error_message": metadata.get("error"),
+        "status_detail": metadata.get("status_detail"),
+        "provider_phase": metadata.get("provider_phase"),
         "provider": _infer_provider(gen),
         "created_at": gen.created_at.isoformat() if gen.created_at else None,
         "provider_job_id": metadata.get("provider_job_id"),
@@ -187,6 +195,7 @@ async def admin_list_users(
                     "username": u.username,
                     "email": u.email,
                     "is_admin": bool(u.is_admin),
+                    "is_superadmin": bool(getattr(u, "is_superadmin", False)),
                     "is_operator": bool(getattr(u, "is_operator", False)),
                     "is_approved": bool(getattr(u, "is_approved", False)) or bool(u.is_admin),
                     "email_verified": bool(getattr(u, "email_verified", False)),
@@ -239,13 +248,15 @@ async def admin_grant_role(
     body: AdminPasswordRequest,
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
-    _require_admin(user)
+    _require_superadmin(user)
     _rate_limit_admin_write(user.user_id)
     _verify_admin_password(user, body.password)
     with db_service.get_session() as session:
         target = session.query(User).filter(User.id == target_user_id).first()
         if not target:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        if target.id == user.user_id:
+            raise HTTPException(status_code=400, detail="Нельзя назначить админом самого себя")
         target.is_admin = True
         _audit_admin_action(
             session=session,
@@ -391,11 +402,18 @@ async def admin_revoke_role(
         if target.id == user.user_id:
             raise HTTPException(status_code=400, detail="Нельзя снять права у самого себя")
 
+        actor = session.query(User).filter(User.id == user.user_id).first()
+        if bool(getattr(target, "is_superadmin", False)):
+            raise HTTPException(status_code=403, detail="Нельзя снять суперадмина")
+        if target.is_admin and not bool(getattr(actor, "is_superadmin", False)):
+            raise HTTPException(status_code=403, detail="Снимать админов может только суперадмин")
+
         admins_count = session.query(User).filter(User.is_admin.is_(True)).count()
         if admins_count <= 1 and target.is_admin:
             raise HTTPException(status_code=400, detail="Нельзя снять права у последнего админа")
 
         target.is_admin = False
+        target.is_superadmin = False
         _audit_admin_action(
             session=session,
             actor_admin_id=user.user_id,
@@ -553,6 +571,11 @@ async def admin_delete_user(
     with db_service.get_session() as session:
         target = _target_user(session, target_user_id)
         _forbid_self(user, target)
+        actor = session.query(User).filter(User.id == user.user_id).first()
+        if bool(getattr(target, "is_superadmin", False)):
+            raise HTTPException(status_code=403, detail="Нельзя удалить суперадмина")
+        if target.is_admin and not bool(getattr(actor, "is_superadmin", False)):
+            raise HTTPException(status_code=403, detail="Удалять админов может только суперадмин")
         _forbid_last_active_admin(session, target)
         username = target.username
         _purge_user_files(session, target.id)

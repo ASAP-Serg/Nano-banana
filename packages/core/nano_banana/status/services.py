@@ -151,6 +151,7 @@ def _build_public_service_status(
     active_google = (google_status.get("active_incidents") or [{}])[0] if google_incident else None
     snap = runtime.snapshot()
     queue_size = get_job_queue().queue_size() if include_internals else 0
+    queue_stalled = False
 
     if is_unavailable:
         hub_state = "unavailable"
@@ -180,15 +181,38 @@ def _build_public_service_status(
                 f"Задач в очереди: {queue_size}."
             )
         )
+    elif is_runtime_degraded:
+        # HTTP жив (принимает 202), но jobs не обрабатываются / upstream сыпется.
+        from nano_banana.providers.errors import is_bananalab_queue_timeout_message
+
+        last_up = str(snap.get("last_upstream_error_message") or "")
+        queue_stalled = is_bananalab_queue_timeout_message(last_up)
+        hub_state = "degraded"
+        if queue_stalled:
+            hub_message = (
+                "Moonez принимает задачи, но их очередь не обрабатывает "
+                "(timeout in queue). Генерации сейчас падают — подождите."
+            )
+        else:
+            hub_message = (
+                "Moonez API отвечает, но генерации нестабильны "
+                "(ошибки upstream). Попробуйте позже."
+            )
+        if include_internals:
+            hub_message += runtime.format_duration_hint(
+                runtime.duration_seconds("upstream_degraded_since"),
+                "Проблема уже",
+            )
     else:
         hub_state = "ok"
         hub_message = "Moonez API принимает запросы и создаёт задачи."
+        queue_stalled = False
 
     if google_incident and active_google:
         gemini_state = "incident"
         gemini_message = active_google.get("title") or "Google сообщает об инциденте Gemini / Vertex AI."
         gemini_source = "google_official"
-    elif is_runtime_degraded:
+    elif is_runtime_degraded and not queue_stalled:
         gemini_state = "degraded"
         gemini_message = "Google upstream нестабилен — генерации могут не пройти."
         if include_internals:
@@ -209,6 +233,10 @@ def _build_public_service_status(
     if is_unavailable or is_paused:
         overall_state = hub_state
         can_generate = False
+        overall_message = hub_message
+    elif hub_state == "degraded":
+        overall_state = "degraded"
+        can_generate = True
         overall_message = hub_message
     elif gemini_state in ("incident", "degraded"):
         overall_state = "degraded"

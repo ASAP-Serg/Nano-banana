@@ -10,9 +10,12 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
   const [email, setEmail] = useState(user?.email || "");
   const [deletePassword, setDeletePassword] = useState("");
   const [deletePhrase, setDeletePhrase] = useState("");
+  const [transferTo, setTransferTo] = useState("");
+  const [adminOptions, setAdminOptions] = useState([]);
   const [busy, setBusy] = useState(false);
   const hasPassword = user?.has_password !== false;
   const emailOk = Boolean(user?.email_verified) || Boolean(user?.google_linked);
+  const isSuper = Boolean(user?.is_superadmin);
 
   async function savePassword(e) {
     e.preventDefault();
@@ -72,14 +75,30 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
     }
   }
 
+  async function loadAdminsForTransfer() {
+    if (!isSuper) return;
+    try {
+      const data = await api.adminUsers({ limit: 100 });
+      const rows = Array.isArray(data?.users) ? data.users : Array.isArray(data) ? data : [];
+      setAdminOptions(rows.filter((u) => u.is_admin && u.id !== user.id && u.is_active !== false));
+    } catch {
+      setAdminOptions([]);
+    }
+  }
+
   async function deleteAccount(e) {
     e.preventDefault();
+    if (isSuper && !transferTo) {
+      toast("Выберите админа, кому передать суперадмина", "error");
+      return;
+    }
     if (!window.confirm("Удалить аккаунт навсегда? Генерации и файлы тоже будут удалены.")) return;
     setBusy(true);
     try {
       await api.deleteAccount({
         current_password: hasPassword ? deletePassword : "",
         confirm: deletePhrase.trim(),
+        transfer_superadmin_to: isSuper ? Number(transferTo) : undefined,
       });
       toast("Аккаунт удалён");
       onDeleted?.();
@@ -198,7 +217,25 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
       <div className="border-top pt-3">
         <h6 className="text-danger">Удалить аккаунт</h6>
         <p className="small text-muted">Безвозвратно: профиль, генерации и файлы.</p>
-        <form onSubmit={deleteAccount}>
+        <form onSubmit={deleteAccount} onFocus={loadAdminsForTransfer}>
+          {isSuper && (
+            <div className="mb-2">
+              <label className="form-label small">Передать суперадмина</label>
+              <select
+                className="form-select form-select-sm"
+                value={transferTo}
+                onChange={(e) => setTransferTo(e.target.value)}
+                required
+              >
+                <option value="">Выберите админа…</option>
+                {adminOptions.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.username} ({a.email})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {hasPassword && (
             <input
               className="form-control mb-2"

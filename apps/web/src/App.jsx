@@ -21,7 +21,7 @@ export default function App() {
   const [showRegister, setShowRegister] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(() => sessionStorage.getItem("nb_admin_open") === "1");
   const [showTotp, setShowTotp] = useState(false);
   const [showTotpComplete, setShowTotpComplete] = useState(false);
   const [showCompleteProfile, setShowCompleteProfile] = useState(false);
@@ -31,6 +31,8 @@ export default function App() {
   const [profileDraft, setProfileDraft] = useState(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [passwordRegister, setPasswordRegister] = useState(false);
+  const [initialVerifyEmail, setInitialVerifyEmail] = useState("");
+  const [initialVerifyCode, setInitialVerifyCode] = useState("");
   const [mailEnabled, setMailEnabled] = useState(false);
   const [trustedDeviceDays, setTrustedDeviceDays] = useState(30);
   const [status, setStatus] = useState(null);
@@ -126,12 +128,32 @@ export default function App() {
     } else if (auth === "verify") {
       const hashParams = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
       const token = hashParams.get("token") || params.get("token") || "";
+      const email = hashParams.get("email") || "";
+      const code = (hashParams.get("code") || "").replace(/\D/g, "").slice(0, 6);
       const url = new URL(window.location.href);
       url.searchParams.delete("auth");
       url.searchParams.delete("reason");
       url.searchParams.delete("token");
       url.hash = "";
       window.history.replaceState({}, "", url.pathname + url.search);
+      if (email && code) {
+        api
+          .verifyEmailCode(email, code)
+          .then(() => loadMe().then(() => toast("Email подтверждён")))
+          .catch(() => {
+            setInitialVerifyEmail(email);
+            setInitialVerifyCode(code);
+            setShowRegister(true);
+            toast("Введите код из письма", "error");
+          });
+        return;
+      }
+      if (email) {
+        setInitialVerifyEmail(email);
+        setInitialVerifyCode(code);
+        setShowRegister(true);
+        return;
+      }
       if (!token) {
         toast("Ссылка подтверждения недействительна", "error");
         return;
@@ -266,16 +288,34 @@ export default function App() {
     try {
       const result = await api.register(form.get("username"), form.get("email"), form.get("password"));
       clearLegacyToken();
-      setShowRegister(false);
       if (result?.needs_verification) {
         toast(result.message || "Проверьте почту — подтвердите email");
-        return;
+        return result;
       }
+      setShowRegister(false);
       await loadMe();
       toast("Регистрация успешна");
+      return result;
     } catch (err) {
       toast(err.message, "error");
+      return null;
     }
+  }
+
+  async function onResendVerify(email) {
+    const result = await api.resendVerification(email);
+    toast(result?.message || "Если аккаунт есть — письмо отправлено");
+    return result;
+  }
+
+  async function onVerifyCode(email, code) {
+    await api.verifyEmailCode(email, code);
+    clearLegacyToken();
+    setShowRegister(false);
+    setInitialVerifyEmail("");
+    setInitialVerifyCode("");
+    await loadMe();
+    toast("Email подтверждён");
   }
 
   async function onForgot(email) {
@@ -425,7 +465,10 @@ export default function App() {
         onAccount={() => setShowAccount(true)}
         onAdmin={() => {
           if (user?.is_admin && !user.totp_enabled) setShowTotp(true);
-          else setShowAdmin(true);
+          else {
+            sessionStorage.setItem("nb_admin_open", "1");
+            setShowAdmin(true);
+          }
         }}
         onTotp={() => setShowTotp(true)}
         onLogout={onLogout}
@@ -507,7 +550,14 @@ export default function App() {
           </div>
         </div>
         {showAdmin && user?.is_admin && user?.totp_enabled && (
-          <AdminPanel onClose={() => setShowAdmin(false)} onInsertToForm={applyAdmin} />
+          <AdminPanel
+            currentUser={user}
+            onClose={() => {
+              sessionStorage.removeItem("nb_admin_open");
+              setShowAdmin(false);
+            }}
+            onInsertToForm={applyAdmin}
+          />
         )}
       </main>
       <AuthModals
@@ -547,6 +597,8 @@ export default function App() {
         }}
         onLogin={onLogin}
         onRegister={onRegister}
+        onResendVerify={onResendVerify}
+        onVerifyCode={onVerifyCode}
         onTotpComplete={onTotpComplete}
         onForgot={onForgot}
         onReset={onReset}
@@ -555,6 +607,8 @@ export default function App() {
         passwordRegister={passwordRegister}
         mailEnabled={mailEnabled}
         trustedDeviceDays={trustedDeviceDays}
+        initialVerifyEmail={initialVerifyEmail}
+        initialVerifyCode={initialVerifyCode}
       />
       {showTotp && user?.is_admin && !user.totp_enabled && (
         <TotpSetup

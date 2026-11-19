@@ -142,6 +142,7 @@ class AuthService:
                     email=db_user.email,
                     is_active=bool(db_user.is_active),
                     is_admin=bool(db_user.is_admin),
+                    is_superadmin=bool(getattr(db_user, "is_superadmin", False)),
                     is_operator=bool(getattr(db_user, "is_operator", False)),
                     totp_enabled=bool(getattr(db_user, "totp_enabled", False)),
                 )

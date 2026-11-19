@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from nano_banana.providers.errors import (
     is_bananalab_paused_message,
+    is_bananalab_queue_timeout_message,
     is_bananalab_unavailable_message,
     is_bananalab_upstream_internal_error_message,
     is_bananalab_upstream_no_image_message,
@@ -20,6 +21,8 @@ def classify_generation_error(status: str, error_text: Optional[str]) -> str:
         return "success"
     if is_bananalab_upstream_internal_error_message(err):
         return "upstream_internal"
+    if is_bananalab_queue_timeout_message(err):
+        return "queue_timeout"
     if is_bananalab_upstream_no_image_message(err):
         return "upstream_no_image"
     if is_policy_block_error(err):
@@ -95,6 +98,12 @@ def build_user_generation_status(
         message = (
             f"У вас {fail_streak} последних генераций подряд без результата "
             f"(upstream no image). Попробуйте упростить промпт или повторить позже."
+        )
+    elif latest_kind == "queue_timeout" or last_error_kind == "queue_timeout":
+        state = "degraded"
+        message = (
+            "Moonez не обрабатывает очередь (timeout in queue). "
+            "Это сбой у провайдера — подождите и повторите."
         )
     elif latest_kind == "policy":
         state = "failing"

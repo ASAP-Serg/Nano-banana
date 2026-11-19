@@ -1,12 +1,13 @@
-"""Transactional email via Resend HTTP API."""
+"""Transactional email via Resend SMTP (HTTPS API often blocked from RU VPS)."""
 from __future__ import annotations
 
 import html
 import logging
+import smtplib
+import ssl
+from email.message import EmailMessage
 from typing import Optional
 from urllib.parse import urlparse
-
-import requests
 
 from nano_banana.config import settings
 
@@ -25,49 +26,89 @@ def _safe_link(url: str) -> str:
     return html.escape(raw, quote=True)
 
 
+def _parse_from(raw: str) -> tuple[str, str]:
+    """Return (display_name, email) from 'Name <email@x>' or bare email."""
+    text = (raw or "").strip()
+    if "<" in text and text.endswith(">"):
+        name, _, rest = text.partition("<")
+        return name.strip().strip('"') or "Nano Banana", rest[:-1].strip()
+    return "Nano Banana", text
+
+
+def _public_origin() -> str:
+    for part in (settings.CORS_ORIGINS or "").split(","):
+        origin = part.strip().rstrip("/")
+        if origin.startswith("https://") or origin.startswith("http://"):
+            return origin
+    return "https://ooneclickk.ru"
+
+
+def _brand_header_html() -> str:
+    logo = html.escape(f"{_public_origin()}/favicon.ico", quote=True)
+    return (
+        "<div style='margin:0 0 20px'>"
+        f"<img src='{logo}' width='48' height='48' alt='Nano Banana' "
+        "style='display:block;border:0;border-radius:10px'/>"
+        "</div>"
+    )
+
+
 def send_email(*, to: str, subject: str, html_body: str, text: Optional[str] = None) -> bool:
     if not mail_configured():
         logger.warning("[MAIL] not configured — skip send to %s (%s)", to, subject)
         return False
-    payload = {
-        "from": settings.MAIL_FROM.strip(),
-        "to": [to.strip()],
-        "subject": subject,
-        "html": html_body,
-    }
-    if text:
-        payload["text"] = text
+
+    api_key = settings.RESEND_API_KEY.strip()
+    from_name, from_email = _parse_from(settings.MAIL_FROM)
+    to_addr = to.strip()
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = f"{from_name} <{from_email}>"
+    msg["To"] = to_addr
+    msg.set_content(text or "Откройте HTML-версию письма.")
+    msg.add_alternative(html_body, subtype="html")
+
+    # Prefer SMTP: api.resend.com HTTPS often times out from RU hosting.
     try:
-        resp = requests.post(
-            "https://api.resend.com/emails",
-            headers={
-                "Authorization": f"Bearer {settings.RESEND_API_KEY.strip()}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=20,
-        )
-        if resp.status_code >= 300:
-            logger.error("[MAIL] Resend %s: %s", resp.status_code, (resp.text or "")[:300])
-            return False
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.resend.com", 465, timeout=20, context=ctx) as smtp:
+            smtp.login("resend", api_key)
+            smtp.send_message(msg)
         return True
     except Exception as exc:
-        logger.error("[MAIL] send failed: %s", type(exc).__name__)
+        logger.error("[MAIL] SMTP send failed: %s: %s", type(exc).__name__, str(exc)[:200])
         return False
 
 
-def send_verify_email(to: str, verify_url: str, username: str) -> bool:
+def send_verify_email(to: str, verify_url: str, username: str, *, code: str = "") -> bool:
     safe_name = html.escape((username or "друг").strip() or "друг")
     link = _safe_link(verify_url)
+    code_digits = "".join(ch for ch in str(code or "") if ch.isdigit())
+    code_block = ""
+    text_code = ""
+    if len(code_digits) == 6:
+        safe_code = html.escape(code_digits)
+        code_block = (
+            f"<p>Код подтверждения:</p>"
+            f"<p style='font-size:28px;letter-spacing:6px;font-weight:700'>{safe_code}</p>"
+            f"<p>Введите его в форме регистрации на сайте.</p>"
+        )
+        text_code = f"\n\nКод подтверждения: {code_digits}\nВведите его на сайте.\n"
     return send_email(
         to=to,
         subject="Подтвердите email — Nano Banana",
-        text=f"Здравствуйте!\n\nПодтвердите email: {verify_url}\n\nСсылка действует 24 часа.",
+        text=(
+            f"Здравствуйте!\n{text_code}\n"
+            f"Или откройте ссылку: {verify_url}\n\nКод/ссылка действуют 24 часа."
+        ),
         html_body=(
+            f"{_brand_header_html()}"
             f"<p>Здравствуйте, <b>{safe_name}</b>!</p>"
             f"<p>Подтвердите email, чтобы завершить регистрацию в Nano Banana.</p>"
-            f'<p><a href="{link}">Подтвердить email</a></p>'
-            f"<p style='color:#666;font-size:13px'>Ссылка действует 24 часа. Если это не вы — просто игнорируйте письмо.</p>"
+            f"{code_block}"
+            f'<p style="margin-top:16px"><a href="{link}">Или подтвердить по ссылке</a></p>'
+            f"<p style='color:#666;font-size:13px'>Действует 24 часа. Если это не вы — просто игнорируйте письмо.</p>"
         ),
     )
 
@@ -80,6 +121,7 @@ def send_reset_password_email(to: str, reset_url: str, username: str) -> bool:
         subject="Сброс пароля — Nano Banana",
         text=f"Здравствуйте!\n\nСброс пароля: {reset_url}\n\nСсылка действует 1 час.",
         html_body=(
+            f"{_brand_header_html()}"
             f"<p>Здравствуйте, <b>{safe_name}</b>!</p>"
             f"<p>Запрос на сброс пароля в Nano Banana.</p>"
             f'<p><a href="{link}">Задать новый пароль</a></p>'

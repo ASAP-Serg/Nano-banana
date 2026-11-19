@@ -2,9 +2,17 @@ import { copyText, downloadImage, formatUsd, isSafeMediaUrl, PROVIDER_BADGE, sho
 import { IconButton, IconDownload, IconInfo, IconRefresh, IconToForm, IconTrash } from "../icons.jsx";
 
 function statusLabel(item) {
-  if (item.status === "pending" || item.status === "running") return "в очереди / идёт";
-  if (item.status === "paused") return "пауза";
-  return item.status;
+  if (item.status === "failed") return item.error_message || "ошибка";
+  if (item.status === "paused") return item.status_detail || "пауза у Moonez";
+  if (item.status === "completed") {
+    if (item.persist_pending) return item.status_detail || "готово · сохраняем копию";
+    return "готово";
+  }
+  if (item.status === "pending") return item.status_detail || "в нашей очереди…";
+  if (item.status === "running") {
+    return item.status_detail || "ждём Moonez…";
+  }
+  return item.status_detail || item.status;
 }
 
 export default function Gallery({

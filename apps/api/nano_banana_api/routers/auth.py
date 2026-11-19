@@ -32,7 +32,9 @@ from nano_banana.email_tokens import (
     PURPOSE_RESET,
     PURPOSE_VERIFY,
     consume_token,
+    consume_verify_code,
     issue_token,
+    issue_verify_code,
 )
 from nano_banana.mail import mail_configured, send_reset_password_email, send_verify_email
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
@@ -50,6 +52,7 @@ from nano_banana.schemas import (
     UserCreateRequest,
     UserLoginRequest,
     UserResponse,
+    VerifyEmailCodeRequest,
     VerifyEmailRequest,
 )
 from nano_banana.generation.cleanup import delete_generation_assets
@@ -181,6 +184,7 @@ def _user_response(db_user: User) -> UserResponse:
         email=db_user.email,
         is_active=bool(db_user.is_active),
         is_admin=bool(db_user.is_admin),
+        is_superadmin=bool(getattr(db_user, "is_superadmin", False)),
         is_operator=bool(getattr(db_user, "is_operator", False)),
         is_approved=bool(getattr(db_user, "is_approved", False)) or bool(db_user.is_admin),
         totp_enabled=bool(getattr(db_user, "totp_enabled", False)),
@@ -245,6 +249,13 @@ def _verify_link(raw_token: str) -> str:
     # Fragment keeps the token out of nginx access logs / Referer (SPA posts it).
     base = _frontend_base().rstrip("/")
     return f"{base}/?auth=verify#token={raw_token}"
+
+
+def _verify_code_link(email: str, code: str) -> str:
+    base = _frontend_base().rstrip("/")
+    q = urlencode({"auth": "verify"})
+    # email+code in fragment — SPA can autofill the form.
+    return f"{base}/?{q}#email={email}&code={code}"
 
 
 def _reset_link(raw_token: str) -> str:
@@ -335,13 +346,22 @@ async def register(
                     detail="Почта не настроена — регистрация временно недоступна. Войдите через Google.",
                 )
         email_norm = str(user_data.email).strip().lower()
-        existing_user = session.query(User).filter(
-            or_(User.username == user_data.username, User.email == email_norm)
-        ).first()
-        if existing_user:
+        # Сравнение username без учёта регистра (Postgres citext нет — lower в Python + ilike).
+        existing_by_name = (
+            session.query(User)
+            .filter(User.username.ilike(user_data.username))
+            .first()
+        )
+        if existing_by_name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Не удалось зарегистрироваться. Проверьте данные или войдите.",
+                detail="Это имя уже занято. Выберите другое или войдите.",
+            )
+        existing_by_email = session.query(User).filter(User.email == email_norm).first()
+        if existing_by_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Этот email уже зарегистрирован. Войдите или восстановите пароль.",
             )
         make_admin = users_count == 0 and bootstrap_ok
         verified = make_admin or not (
@@ -354,6 +374,7 @@ async def register(
             hashed_password=hashed_password,
             is_active=True,
             is_admin=make_admin,
+            is_superadmin=make_admin,
             is_approved=approved,
             token_version=0,
             email_verified=verified,
@@ -373,12 +394,17 @@ async def register(
         session.refresh(new_user)
 
         if not verified:
-            raw = issue_token(session, new_user.id, PURPOSE_VERIFY, hours=24)
+            code = issue_verify_code(session, new_user.id, hours=24)
             session.commit()
-            send_verify_email(email_norm, _verify_link(raw), new_user.username)
-            msg = "Мы отправили письмо со ссылкой. Подтвердите email, затем войдите."
+            send_verify_email(
+                email_norm,
+                _verify_code_link(email_norm, code),
+                new_user.username,
+                code=code,
+            )
+            msg = "Мы отправили код на email. Введите его в форме, чтобы подтвердить аккаунт."
             if not approved:
-                msg += " После этого админ откроет доступ к генерациям."
+                msg += " После подтверждения админ откроет доступ к генерациям."
             return {
                 "ok": True,
                 "needs_verification": True,
@@ -436,7 +462,18 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         if not user or not user.hashed_password or not password_ok or not user.is_active:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_LOGIN_FAIL)
 
-        # Unverified / unapproved users may still log in — generate is gated separately.
+        # Как у нормальных сервисов: без подтверждённого email сессию не выдаём.
+        if (
+            settings.SECURITY_REQUIRE_EMAIL_VERIFY
+            and mail_configured()
+            and not bool(getattr(user, "email_verified", False))
+            and not getattr(user, "google_sub", None)
+            and not bool(getattr(user, "is_admin", False))
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Подтвердите email: введите 6-значный код из письма (или запросите письмо снова).",
+            )
 
         totp_just_ok = False
         if getattr(user, "totp_enabled", False):
@@ -533,6 +570,34 @@ async def verify_email_post(body: VerifyEmailRequest, request: Request, response
     return {"ok": True, "verified": True}
 
 
+@router.post("/verify-email-code")
+async def verify_email_code(body: VerifyEmailCodeRequest, request: Request, response: Response):
+    check_rate_limit(
+        "verify-email-code",
+        client_ip_from_request(request),
+        30,
+        3600,
+        "Слишком много попыток подтверждения. Попробуйте позже.",
+    )
+    email = str(body.email).strip().lower()
+    with db_service.get_session() as session:
+        user = session.query(User).filter(User.email == email).first()
+        if not user or not user.is_active:
+            raise HTTPException(status_code=400, detail="Неверный код или email")
+        if bool(getattr(user, "email_verified", False)):
+            access = await auth_service.create_access_token(user)
+            _set_access_cookie(response, access)
+            return {"ok": True, "verified": True}
+        if not consume_verify_code(session, user.id, body.code):
+            raise HTTPException(status_code=400, detail="Неверный или просроченный код")
+        user.email_verified = True
+        session.commit()
+        session.refresh(user)
+        access = await auth_service.create_access_token(user)
+        _set_access_cookie(response, access)
+    return {"ok": True, "verified": True}
+
+
 @router.post("/resend-verification")
 async def resend_verification(body: ResendVerifyRequest, request: Request):
     check_rate_limit(
@@ -550,9 +615,14 @@ async def resend_verification(body: ResendVerifyRequest, request: Request):
     with db_service.get_session() as session:
         user = session.query(User).filter(User.email == email).first()
         if user and user.is_active and not user.email_verified and user.hashed_password:
-            raw = issue_token(session, user.id, PURPOSE_VERIFY, hours=24)
+            code = issue_verify_code(session, user.id, hours=24)
             session.commit()
-            send_verify_email(email, _verify_link(raw), user.username)
+            send_verify_email(
+                email,
+                _verify_code_link(email, code),
+                user.username,
+                code=code,
+            )
     return msg
 
 
@@ -597,10 +667,15 @@ async def update_email(
             session.commit()
             session.refresh(db_user)
             raise HTTPException(status_code=503, detail="Почта не настроена — напишите админу")
-        raw = issue_token(session, db_user.id, PURPOSE_VERIFY, hours=24)
+        code = issue_verify_code(session, db_user.id, hours=24)
         session.commit()
         session.refresh(db_user)
-        send_verify_email(email_norm, _verify_link(raw), db_user.username)
+        send_verify_email(
+            email_norm,
+            _verify_code_link(email_norm, code),
+            db_user.username,
+            code=code,
+        )
         return _user_response(db_user)
 
 
@@ -633,6 +708,19 @@ async def delete_my_account(
                     status_code=400,
                     detail="Нельзя удалить последнего админа — сначала назначьте другого",
                 )
+        if bool(getattr(db_user, "is_superadmin", False)):
+            transfer_id = body.transfer_superadmin_to
+            if not transfer_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Суперадмин: укажите transfer_superadmin_to — кому передать владельца",
+                )
+            heir = session.query(User).filter(User.id == int(transfer_id)).first()
+            if not heir or not heir.is_active or heir.id == db_user.id:
+                raise HTTPException(status_code=400, detail="Некому передать суперадмина")
+            heir.is_admin = True
+            heir.is_superadmin = True
+            db_user.is_superadmin = False
         if db_user.hashed_password:
             if not body.current_password or not auth_service.verify_password(
                 body.current_password, db_user.hashed_password

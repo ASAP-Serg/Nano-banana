@@ -6,7 +6,9 @@ import base64
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+StatusCallback = Optional[Callable[[Dict[str, Any]], None]]
 
 import requests
 
@@ -212,6 +214,12 @@ def _optimize_image_for_api(image_data: bytes, ref_index: int) -> bytes:
     return ReplicateService._optimize_image_for_api(_RefOptimizeShim(), image_data, ref_index)
 
 
+def _as_moonez_data_uri(image_data: bytes, mime: str = "image/jpeg") -> str:
+    """nano-script шлёт data URI; сырой base64 Moonez иногда принимает хуже."""
+    encoded = base64.b64encode(image_data).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
+
+
 class BananalabService:
     TIMEOUT = 900
     JOB_TIMEOUT_SECONDS = 420
@@ -253,7 +261,12 @@ class BananalabService:
     def _job_status_normalized(data: Dict[str, Any]) -> str:
         return str(data.get("status") or "").strip().lower()
 
-    def _poll_job_until_done(self, initial: Dict[str, Any]) -> Dict[str, Any]:
+    def _poll_job_until_done(
+        self,
+        initial: Dict[str, Any],
+        *,
+        on_status: StatusCallback = None,
+    ) -> Dict[str, Any]:
         """Опрос GET status_url пока задача не завершится или не истечёт TIMEOUT."""
         status_url = absolute_job_status_url(self.base_url, initial)
         if not status_url:
@@ -264,6 +277,21 @@ class BananalabService:
         current: Any = initial
         last_logged: Optional[str] = None
         job_id = initial.get("job_id")
+
+        def _emit(phase: str) -> None:
+            if not on_status:
+                return
+            try:
+                on_status(
+                    {
+                        "phase": phase,
+                        "job_id": job_id,
+                        "elapsed": time.time() - poll_started_at,
+                        "raw_status": (current or {}).get("status") if isinstance(current, dict) else phase,
+                    }
+                )
+            except Exception:
+                logger.exception("[BANANALAB] on_status failed")
 
         while time.time() < deadline:
             if not isinstance(current, dict):
@@ -279,6 +307,7 @@ class BananalabService:
             if isinstance(current.get("job_id"), str) and current.get("job_id").strip():
                 job_id = current.get("job_id")
             if "paused" in diag:
+                _emit("paused")
                 return _job_fail(
                     str(
                         current.get("error")
@@ -303,6 +332,7 @@ class BananalabService:
                     else current.get("reserved") or current.get("cost"),
                 )
                 last_logged = st
+                _emit(st or "unknown")
 
             if st in ("completed", "succeeded", "success", "done", "finished"):
                 return _stamp_job_price(current, initial)
@@ -392,6 +422,7 @@ class BananalabService:
         seed: Optional[int] = None,
         reference_images: Optional[List] = None,
         model_name: Optional[str] = None,
+        on_status: StatusCallback = None,
     ) -> Dict[str, Any]:
         if negative_prompt:
             logger.debug("[BANANALAB] negative_prompt игнорируется API Banana Lab")
@@ -417,7 +448,7 @@ class BananalabService:
                         _, encoded = img.split(",", 1)
                         img_data = base64.b64decode(encoded)
                         img_data = _optimize_image_for_api(img_data, idx)
-                        input_b64_list.append(base64.b64encode(img_data).decode("ascii"))
+                        input_b64_list.append(_as_moonez_data_uri(img_data))
                     elif img.startswith(("http://", "https://")):
                         # Предпочитаем нативный endpoint URL-generations — быстрее, без перекодирования в base64.
                         input_url_list.append(img)
@@ -426,7 +457,7 @@ class BananalabService:
                 elif hasattr(img, "read"):
                     img.seek(0)
                     img_data = _optimize_image_for_api(img.read(), idx)
-                    input_b64_list.append(base64.b64encode(img_data).decode("ascii"))
+                    input_b64_list.append(_as_moonez_data_uri(img_data))
             except Exception as e:
                 logger.error("[BANANALAB] Ошибка референса %s: %s", idx, e)
 
@@ -454,7 +485,7 @@ class BananalabService:
                         img_bytes = download_image_from_url(img_url, read_timeout=30, retries=2)
                         if img_bytes:
                             img_data = _optimize_image_for_api(img_bytes, idx)
-                            b64.append(base64.b64encode(img_data).decode("ascii"))
+                            b64.append(_as_moonez_data_uri(img_data))
                     except Exception as e:
                         logger.warning("[BANANALAB] fallback URL->base64 не удался для ref %s: %s", idx, e)
             return build_generation_request(
@@ -617,7 +648,19 @@ class BananalabService:
 
                 if isinstance(data, dict) and (data.get("job_id") or data.get("status_url")):
                     posted = data
-                    data = self._poll_job_until_done(data)
+                    if on_status:
+                        try:
+                            on_status(
+                                {
+                                    "phase": self._job_status_normalized(data) or "queued",
+                                    "job_id": data.get("job_id"),
+                                    "elapsed": 0.0,
+                                    "raw_status": data.get("status"),
+                                }
+                            )
+                        except Exception:
+                            logger.exception("[BANANALAB] on_status failed")
+                    data = self._poll_job_until_done(data, on_status=on_status)
                     if isinstance(data, dict) and data.get("__bananalab_job_failed__"):
                         raw_err = data.get("raw_error") or data.get("error")
                         err_msg = str(data.get("error") or "Ошибка задачи Banana Lab")

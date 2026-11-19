@@ -15,6 +15,8 @@ _DEFAULT_OUTBOUND_IMAGE_HOST_SUFFIXES = (
     "replicate.delivery",
     "replicate.com",
     "moonez.ai",
+    "rendergrid.io",
+    "cdn.rendergrid.io",
     "googleusercontent.com",
     "storage.googleapis.com",
 )

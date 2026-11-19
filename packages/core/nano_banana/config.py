@@ -80,8 +80,8 @@ class Settings(BaseSettings):
     # Beget: false + presigned URLs. Local MinIO can set true for convenience.
     S3_PUBLIC_READ: bool = False
     WORKER_ID: str = ""
-    JOB_LOCK_TTL_SECONDS: int = 180
-    STUCK_GENERATION_MINUTES: int = 20
+    JOB_LOCK_TTL_SECONDS: int = 900
+    STUCK_GENERATION_MINUTES: int = 25
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7

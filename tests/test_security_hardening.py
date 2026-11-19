@@ -406,6 +406,18 @@ class TestResidualRemoteSurface(unittest.TestCase):
         )
         self.assertEqual(client_result_url(gen), "/api/v1/images/9/file")
         self.assertEqual(client_reference_urls(gen), ["/api/v1/images/9/reference/0"])
+        pending = SimpleNamespace(
+            id=10,
+            result_path=None,
+            result_url=None,
+            generation_metadata={
+                "provider_image_url": "https://cdn.rendergrid.io/images/x.jpg",
+                "persist_pending": True,
+            },
+        )
+        self.assertEqual(client_result_url(pending), "/api/v1/images/10/file")
+        empty = SimpleNamespace(id=11, result_path=None, result_url=None, generation_metadata={})
+        self.assertIsNone(client_result_url(empty))
 
     def test_http_reference_from_client_rejected(self):
         from nano_banana.generation.references import store_reference_images
@@ -935,10 +947,23 @@ class TestOwaspSecurityContracts(unittest.TestCase):
         auth = self._repo("apps", "api", "nano_banana_api", "routers", "auth.py")
         delete_idx = auth.find("async def delete_my_account")
         self.assertGreater(delete_idx, 0)
-        block = auth[delete_idx : delete_idx + 2500]
+        block = auth[delete_idx : delete_idx + 4500]
         self.assertIn("_clear_access_cookie", block)
         self.assertIn("_clear_trusted_cookie", block)
         self.assertIn("session.delete(db_user)", block)
+        self.assertIn("transfer_superadmin_to", block)
+
+    def test_grant_admin_requires_superadmin(self):
+        admin = self._repo("apps", "api", "nano_banana_api", "routers", "admin.py")
+        self.assertIn("def _require_superadmin", admin)
+        grant_idx = admin.find("async def admin_grant_role")
+        self.assertGreater(grant_idx, 0)
+        grant_block = admin[grant_idx : grant_idx + 700]
+        self.assertIn("_require_superadmin(user)", grant_block)
+        revoke_idx = admin.find("async def admin_revoke_role")
+        self.assertGreater(revoke_idx, 0)
+        revoke_block = admin[revoke_idx : revoke_idx + 1200]
+        self.assertIn("Снимать админов может только суперадмин", revoke_block)
 
     def test_storage_nginx_blocks_console_and_minio(self):
         storage = self._repo("deploy", "nginx", "storage.ooneclickk.ru.conf")

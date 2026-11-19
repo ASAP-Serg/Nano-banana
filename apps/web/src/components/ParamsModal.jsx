@@ -59,6 +59,8 @@ export default function ParamsModal({ item, onClose }) {
         </p>
         <p>
           <strong>Статус:</strong> {item.status}
+          {item.status_detail ? ` · ${item.status_detail}` : ""}
+          {item.provider_phase ? ` (${item.provider_phase})` : ""}
         </p>
         {item.original_prompt && (
           <div className="mb-3">

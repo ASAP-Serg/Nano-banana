@@ -21,6 +21,7 @@ from nano_banana.providers.errors import (
     humanize_api_error,
     is_bananalab_empty_done_message,
     is_bananalab_paused_message,
+    is_bananalab_queue_timeout_message,
     is_bananalab_unavailable_message,
     is_bananalab_upstream_internal_error_message,
     is_bananalab_upstream_no_image_message,
@@ -72,7 +73,39 @@ def rewrite_metadata_fields(metadata: Optional[dict]) -> dict:
         "provider_job_id": meta.get("provider_job_id"),
         "provider_model": meta.get("provider_model"),
         "provider_cost_usd": meta.get("provider_cost_usd"),
+        "provider_phase": meta.get("provider_phase"),
+        "status_detail": meta.get("status_detail"),
+        "persist_pending": bool(meta.get("persist_pending")),
     }
+
+
+_PROVIDER_PHASE_LABELS = {
+    "queued": "Ждём Moonez — задача в их очереди",
+    "pending": "Ждём Moonez — задача в их очереди",
+    "processing": "Moonez рисует…",
+    "running": "Moonez рисует…",
+    "in_progress": "Moonez рисует…",
+    "started": "Moonez рисует…",
+    "working": "Moonez рисует…",
+    "done": "Moonez готов, сохраняем…",
+    "completed": "Moonez готов, сохраняем…",
+    "succeeded": "Moonez готов, сохраняем…",
+    "success": "Moonez готов, сохраняем…",
+    "finished": "Moonez готов, сохраняем…",
+    "paused": "Moonez на паузе",
+    "failed": "Moonez вернул ошибку",
+    "error": "Moonez вернул ошибку",
+}
+
+
+def _status_detail_for_phase(phase: str, *, elapsed: float = 0.0) -> str:
+    label = _PROVIDER_PHASE_LABELS.get((phase or "").strip().lower()) or f"Moonez: {phase or '…'}"
+    if elapsed >= 60:
+        mins = int(elapsed // 60)
+        return f"{label} ({mins} мин)"
+    if elapsed >= 15:
+        return f"{label} ({int(elapsed)} с)"
+    return label
 
 
 def _store_provider_trace(generation, result: Optional[dict]) -> None:
@@ -194,6 +227,11 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 )
                 return
             generation.status = "running"
+            if not generation.generation_metadata:
+                generation.generation_metadata = {}
+            generation.generation_metadata["status_detail"] = "Отправляем задачу в Moonez…"
+            generation.generation_metadata["provider_phase"] = "submitting"
+            flag_modified(generation, "generation_metadata")
             session.commit()
             queue.refresh_lock(generation_id)
 
@@ -248,20 +286,39 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 _fail(generation, session, "Не удалось прочитать референс.")
                 return
 
+            def _on_provider_status(info: Dict[str, Any]) -> None:
+                phase = str(info.get("phase") or "").strip().lower()
+                job_id = info.get("job_id")
+                elapsed = float(info.get("elapsed") or 0.0)
+                if not generation.generation_metadata:
+                    generation.generation_metadata = {}
+                generation.generation_metadata["provider_phase"] = phase or "unknown"
+                generation.generation_metadata["status_detail"] = _status_detail_for_phase(
+                    phase, elapsed=elapsed
+                )
+                if job_id:
+                    generation.generation_metadata["provider_job_id"] = str(job_id)[:128]
+                flag_modified(generation, "generation_metadata")
+                session.commit()
+                queue.refresh_lock(generation_id)
+
             while True:
                 queue.refresh_lock(generation_id)
                 try:
-                    result = generation_service.generate_image(
-                        prompt=prompt_for_generation,
-                        negative_prompt=request_data.get("negative_prompt"),
-                        resolution=request_data.get("resolution", "1K"),
-                        aspect_ratio=request_data.get("aspect_ratio", "1:1"),
-                        guidance_scale=request_data.get("guidance_scale", 7.5),
-                        num_inference_steps=request_data.get("num_inference_steps", 50),
-                        seed=request_data.get("seed"),
-                        reference_images=provider_refs,
-                        model_name=model_name,
-                    )
+                    gen_kwargs = {
+                        "prompt": prompt_for_generation,
+                        "negative_prompt": request_data.get("negative_prompt"),
+                        "resolution": request_data.get("resolution", "1K"),
+                        "aspect_ratio": request_data.get("aspect_ratio", "1:1"),
+                        "guidance_scale": request_data.get("guidance_scale", 7.5),
+                        "num_inference_steps": request_data.get("num_inference_steps", 50),
+                        "seed": request_data.get("seed"),
+                        "reference_images": provider_refs,
+                        "model_name": model_name,
+                    }
+                    if provider == "bananalab":
+                        gen_kwargs["on_status"] = _on_provider_status
+                    result = generation_service.generate_image(**gen_kwargs)
                 except Exception as gen_error:
                     error_msg = str(getattr(gen_error, "message", None) or gen_error)
                     full_error_msg = humanize_api_error(error_msg, provider=provider)
@@ -313,8 +370,74 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                     runtime.mark_success()
                 if generation.generation_metadata and generation.generation_metadata.get("paused_request_data"):
                     generation.generation_metadata.pop("paused_request_data", None)
+                if not generation.generation_metadata:
+                    generation.generation_metadata = {}
+
+                image_data = result.get("image_data")
+                image_url = result.get("image_url")
+                has_bytes = isinstance(image_data, (bytes, bytearray)) and len(image_data) >= 512
+                provider_url = image_url.strip() if isinstance(image_url, str) else ""
+
+                # RU VPS → Cloudflare CDN очень медленный. Сразу помечаем completed с CDN URL,
+                # браузер получит 302 на CDN (быстро с домашнего ISP), MinIO докачаем следом.
+                if provider_url and not has_bytes:
+                    try:
+                        from nano_banana.security import assert_safe_outbound_image_url
+
+                        assert_safe_outbound_image_url(provider_url, settings)
+                    except ValueError:
+                        _fail(generation, session, "Провайдер вернул небезопасный URL изображения.")
+                        return
+                    generation.generation_metadata["provider_image_url"] = provider_url
+                    generation.generation_metadata["persist_pending"] = True
+                    flag_modified(generation, "generation_metadata")
+                    generation.status = "completed"
+                    generation.completed_at = datetime.utcnow()
+                    session.commit()
+                    logger.info(
+                        "[GENERATION] %s ready via provider CDN in %.1fs (MinIO persist follows)",
+                        generation_id,
+                        (generation.completed_at - started_at).total_seconds(),
+                    )
+
+                    def _on_download_progress(done: int, total: int | None) -> None:
+                        queue.refresh_lock(generation_id)
+
+                    try:
+                        upload_result = persist_generation_result(
+                            get_storage(),
+                            result,
+                            on_progress=_on_download_progress,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "[GENERATION] MinIO persist failed gen=%s (CDN fallback active)",
+                            generation_id,
+                        )
+                        return
+                    if upload_result:
+                        generation.result_url = upload_result["path"]
+                        generation.result_path = upload_result["path"]
+                        generation.generation_metadata["persist_pending"] = False
+                        flag_modified(generation, "generation_metadata")
+                        session.commit()
+                        logger.info("[GENERATION] %s persisted to MinIO", generation_id)
+                    else:
+                        logger.warning(
+                            "[GENERATION] %s MinIO persist empty — CDN fallback remains",
+                            generation_id,
+                        )
+                    return
+
                 try:
-                    upload_result = persist_generation_result(get_storage(), result)
+                    def _on_download_progress(done: int, total: int | None) -> None:
+                        queue.refresh_lock(generation_id)
+
+                    upload_result = persist_generation_result(
+                        get_storage(),
+                        result,
+                        on_progress=_on_download_progress,
+                    )
                 except Exception:
                     logger.exception("[GENERATION] persist failed gen=%s", generation_id)
                     _fail(generation, session, "Не удалось сохранить изображение в хранилище.")
@@ -418,7 +541,10 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 generation.generation_metadata["error_code"] = "upstream_no_image"
             if len(error_message) > 2000:
                 error_message = error_message[:2000] + "... (сообщение обрезано)"
-            if provider == "bananalab" and is_bananalab_upstream_internal_error_message(last_raw_error or error_message):
+            if provider == "bananalab" and (
+                is_bananalab_upstream_internal_error_message(last_raw_error or error_message)
+                or is_bananalab_queue_timeout_message(last_raw_error or error_message)
+            ):
                 runtime.mark_upstream_degraded(last_raw_error or error_message)
             save_error_to_file(
                 {

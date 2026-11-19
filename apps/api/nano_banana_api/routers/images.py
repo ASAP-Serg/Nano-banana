@@ -5,7 +5,7 @@ import logging
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm.attributes import flag_modified
 
 from nano_banana.auth import auth_service
@@ -149,6 +149,17 @@ async def generate_image(
                     if row.body and str(row.body).strip()
                 }
             prompt_text, variant = resolve_mosaic_prompt(body.mosaic_kind, overrides)
+            slot_map = {
+                "direct": "Image 1 is <person>. Image 2 is <clothing>.",
+                "combo": "Image 1 is <person>. Image 2 is the top clothing. Image 3 is the bottom clothing.",
+                "synthetic": "Image 1 is <person>. Image 2 is <body shape>. Image 3 is <clothing>.",
+                "synthetic_combo": (
+                    "Image 1 is <person>. Image 2 is <body shape>. "
+                    "Image 3 is the top <clothing>. Image 4 is the bottom <clothing>."
+                ),
+            }.get(body.mosaic_kind, "")
+            if slot_map:
+                prompt_text = slot_map + "\n" + prompt_text
             body = body.model_copy(
                 update={
                     "negative_prompt": None,
@@ -190,6 +201,8 @@ async def generate_image(
                 "provider": model_provider,
                 "retry_count": 0,
                 "max_retries": MAX_GENERATION_RETRIES,
+                "status_detail": "В нашей очереди…",
+                "provider_phase": "local_queue",
                 **mosaic_meta,
             }
             generation = Generation(
@@ -430,13 +443,27 @@ async def get_generation_file(
     with db_service.get_session() as session:
         generation = _load_accessible_generation(session, generation_id, user)
         source = getattr(generation, "result_path", None) or generation.result_url
-        if not source:
+        meta = generation.generation_metadata or {}
+        provider_url = meta.get("provider_image_url") if isinstance(meta, dict) else None
+        if not source and not provider_url:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
-    try:
-        data, content_type = _storage().get_object_bytes(source)
-    except (FileNotFoundError, ValueError):
-        raise HTTPException(status_code=404, detail="Генерация не найдена") from None
-    return _media_bytes_response(data, content_type)
+    if source:
+        try:
+            data, content_type = _storage().get_object_bytes(source)
+            return _media_bytes_response(data, content_type)
+        except (FileNotFoundError, ValueError):
+            # MinIO ещё нет — ниже fallback на CDN провайдера.
+            pass
+    if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
+        from nano_banana.security import assert_safe_outbound_image_url
+
+        try:
+            assert_safe_outbound_image_url(provider_url, settings)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
+        # Браузер качает с CDN напрямую (с домашнего ISP быстро; с RU VPS — нет).
+        return RedirectResponse(url=provider_url, status_code=302)
+    raise HTTPException(status_code=404, detail="Генерация не найдена")
 
 
 @router.get("/{generation_id}/reference/{index}")

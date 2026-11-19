@@ -325,6 +325,17 @@ def is_bananalab_upstream_internal_error_message(text: Any) -> bool:
     )
 
 
+def is_bananalab_queue_timeout_message(text: Any) -> bool:
+    """Job принят, но Moonez не взял его из своей очереди (их затор/suppliers)."""
+    lower = str(text or "").lower()
+    return (
+        "timeout in queue" in lower
+        or ("timeout" in lower and "queue" in lower)
+        or "не успел взять задачу из своей очереди" in lower
+        or "ошибка очереди moonez" in lower
+    )
+
+
 def _looks_like_html(text: str) -> bool:
     lower = text.lower()
     return any(
@@ -491,6 +502,12 @@ def humanize_api_error(
 
     if is_bananalab_upstream_no_image_message(text):
         return BANANALAB_UPSTREAM_NO_IMAGE_RETRY_MESSAGE
+
+    if is_bananalab_queue_timeout_message(text):
+        return (
+            "Moonez не успел взять задачу из своей очереди (timeout). "
+            "У них сейчас затор — подождите и запустите ещё раз."
+        )
 
     if is_openrouter_security_policy(text):
         if provider == "openrouter":
