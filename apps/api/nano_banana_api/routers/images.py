@@ -301,6 +301,12 @@ async def list_generations(
         for gen in generations:
             meta = gen.generation_metadata or {}
             model_name = gen.model_name or meta.get("model_name") or "nano-banana-pro"
+            site_ready = None
+            if gen.completed_at and gen.created_at:
+                try:
+                    site_ready = round((gen.completed_at - gen.created_at).total_seconds(), 1)
+                except Exception:
+                    site_ready = None
             item = ImageResponse(
                 id=gen.id,
                 user_id=gen.user_id,
@@ -312,6 +318,8 @@ async def list_generations(
                 result_url=client_result_url(gen),
                 status=gen.status,
                 created_at=gen.created_at,
+                completed_at=gen.completed_at,
+                site_ready_seconds=site_ready,
                 error_message=meta.get("error"),
                 model_name=model_name,
                 retry_count=int(meta.get("retry_count", 0) or 0),
@@ -327,6 +335,8 @@ async def list_generations(
             data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
             if data.get("created_at"):
                 data["created_at"] = data["created_at"].isoformat()
+            if data.get("completed_at"):
+                data["completed_at"] = data["completed_at"].isoformat()
             result.append(_hide_mosaic_prompt(data, meta, user))
         return JSONResponse(
             content={

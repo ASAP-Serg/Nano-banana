@@ -45,8 +45,27 @@ jobs:
               DC="docker-compose"
             fi
 
-            docker rm -f nano_banana_migrate 2>/dev/null || true
-            $DC up -d --build --remove-orphans
+            # Avoid "removal already in progress" races when a previous deploy
+            # or manual restart is mid-recreate.
+            $DC stop api worker web migrate 2>/dev/null || true
+            docker rm -f nano_banana_migrate nano_banana_worker nano_banana_api nano_banana_web 2>/dev/null || true
+            sleep 2
+
+            up_ok=0
+            for attempt in 1 2 3; do
+              if $DC up -d --build --remove-orphans; then
+                up_ok=1
+                break
+              fi
+              echo "compose up failed (attempt $attempt), retrying…"
+              sleep 5
+              docker rm -f nano_banana_migrate nano_banana_worker nano_banana_api nano_banana_web 2>/dev/null || true
+            done
+            if [ "$up_ok" -ne 1 ]; then
+              echo "ERROR: docker compose up failed after retries"
+              exit 1
+            fi
+
             sleep 25
             $DC ps
 

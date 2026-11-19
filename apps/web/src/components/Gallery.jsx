@@ -1,4 +1,13 @@
-import { copyText, downloadImage, formatUsd, isSafeMediaUrl, PROVIDER_BADGE, shortJobId, toast } from "../toast.js";
+import {
+  copyText,
+  downloadImage,
+  formatDurationSeconds,
+  formatUsd,
+  isSafeMediaUrl,
+  PROVIDER_BADGE,
+  shortJobId,
+  toast,
+} from "../toast.js";
 import { IconButton, IconDownload, IconInfo, IconRefresh, IconToForm, IconTrash } from "../icons.jsx";
 
 function statusLabel(item) {
@@ -80,11 +89,25 @@ export default function Gallery({
                     #{item.id} · {item.model_name} · {statusLabel(item)}
                     {item.provider ? ` · ${PROVIDER_BADGE[item.provider] || item.provider}` : ""}
                   </div>
-                  {item.provider_cost_usd != null ? (
-                    <div className="small text-muted">{formatUsd(item.provider_cost_usd)} Moonez</div>
-                  ) : item.status !== "failed" && item.estimated_cost_usd != null ? (
-                    <div className="small text-muted">~{formatUsd(item.estimated_cost_usd)} оценка</div>
-                  ) : null}
+                  {(item.provider_cost_usd != null ||
+                    (item.status !== "failed" && item.estimated_cost_usd != null) ||
+                    item.site_ready_seconds != null) && (
+                    <div className="small text-muted">
+                      {item.provider_cost_usd != null
+                        ? `${formatUsd(item.provider_cost_usd)} Moonez`
+                        : item.status !== "failed" && item.estimated_cost_usd != null
+                          ? `~${formatUsd(item.estimated_cost_usd)} оценка`
+                          : null}
+                      {item.site_ready_seconds != null && (
+                        <>
+                          {(item.provider_cost_usd != null ||
+                            (item.status !== "failed" && item.estimated_cost_usd != null)) &&
+                            " · "}
+                          {formatDurationSeconds(item.site_ready_seconds)} до скачивания
+                        </>
+                      )}
+                    </div>
+                  )}
                   {item.provider_job_id ? (
                     <button
                       type="button"

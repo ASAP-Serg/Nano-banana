@@ -7,6 +7,19 @@ export async function copyText(text, label = "ID") {
   }
 }
 
+/** Format seconds for gallery cards: 12.4 с / 1 мин 5 с */
+export function formatDurationSeconds(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n < 60) {
+    const rounded = Math.round(n * 10) / 10;
+    return `${String(rounded).replace(/\.0$/, "")} с`;
+  }
+  const m = Math.floor(n / 60);
+  const s = Math.round(n % 60);
+  return `${m} мин ${s} с`;
+}
+
 export function formatUsd(n) {
   const value = Number(n);
   if (!Number.isFinite(value)) return null;

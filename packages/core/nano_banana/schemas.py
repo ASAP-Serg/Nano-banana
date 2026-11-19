@@ -427,6 +427,9 @@ class ImageResponse(BaseModel):
     result_url: Optional[str]
     status: str
     created_at: datetime
+    completed_at: Optional[datetime] = None
+    # Seconds from create (click) until downloadable on the site.
+    site_ready_seconds: Optional[float] = None
     error_message: Optional[str] = None
     model_name: Optional[str] = None  # Модель, использованная для генерации
     retry_count: Optional[int] = 0  # Количество уже выполненных ретраев
