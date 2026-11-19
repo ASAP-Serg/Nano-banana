@@ -119,6 +119,41 @@ jobs:
             sudo chmod 775 /var/www/uploader/files /var/www/uploader/jobs
             echo "Uploader tree:"
             ls -la /var/www/uploader | head -30
+            ls -la /var/www/uploader/jobs 2>/dev/null | head -20 || true
+
+            # Salaris API (Mosaica No-status Selenium) — https://ooneclickk.ru/salaris
+            SALARIS_DIR=/srv/salaris-api
+            if [ ! -d "$SALARIS_DIR/.git" ]; then
+              sudo mkdir -p "$SALARIS_DIR"
+              sudo git clone https://github.com/ASAP-Serg/SalarisDisabledRemover.git "$SALARIS_DIR"
+            fi
+            sudo git -C "$SALARIS_DIR" fetch origin
+            sudo git -C "$SALARIS_DIR" reset --hard origin/master
+            if [ ! -f "$SALARIS_DIR/.env" ]; then
+              if [ -f deploy/salaris.env.example ]; then
+                sudo cp deploy/salaris.env.example "$SALARIS_DIR/.env"
+              elif [ -f "$SALARIS_DIR/.env.example" ]; then
+                sudo cp "$SALARIS_DIR/.env.example" "$SALARIS_DIR/.env"
+              fi
+              echo "WARN: fill $SALARIS_DIR/.env (MOSAICA_*, API_KEY, GOOGLE_SHEETS_CREDENTIALS)"
+            fi
+            if [ -f deploy/nginx/salaris-proxy.snippet.conf ]; then
+              sudo cp deploy/nginx/salaris-proxy.snippet.conf /etc/nginx/snippets/salaris-proxy.conf
+              for conf in /etc/nginx/sites-enabled/ooneclickk.ru /etc/nginx/sites-available/ooneclickk.ru; do
+                if [ -f "$conf" ] && ! grep -q 'snippets/salaris-proxy.conf' "$conf"; then
+                  sudo sed -i '/location \/ {/i\    include snippets/salaris-proxy.conf;\n' "$conf" || true
+                fi
+              done
+            fi
+            if command -v docker >/dev/null 2>&1; then
+              if docker compose version >/dev/null 2>&1; then
+                SDC="docker compose"
+              else
+                SDC="docker-compose"
+              fi
+              (cd "$SALARIS_DIR" && sudo $SDC up -d --build) || echo "WARN: salaris compose failed (check .env / RAM)"
+              (cd "$SALARIS_DIR" && sudo $SDC ps) || true
+            fi
 
             # Host nginx configs live on the VPS (not in git). Reload if present.
             if command -v nginx >/dev/null 2>&1; then
