@@ -4,7 +4,6 @@ import {
   formatDurationSeconds,
   formatUsd,
   isSafeMediaUrl,
-  PROVIDER_BADGE,
   shortJobId,
   toast,
 } from "../toast.js";
@@ -22,6 +21,18 @@ function statusLabel(item) {
     return item.status_detail || "ждём Moonez…";
   }
   return item.status_detail || item.status;
+}
+
+function retryWord(n) {
+  if (n === 1) return "ретрай";
+  if (n >= 2 && n <= 4) return "ретрая";
+  return "ретраев";
+}
+
+function shortModelName(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return "—";
+  return raw.replace(/^gemini-/i, "").replace(/^nano-banana-/i, "nb-");
 }
 
 export default function Gallery({
@@ -85,56 +96,62 @@ export default function Gallery({
                         }[item.mosaic_kind] || "Мозаика · Transfer"
                       : item.prompt}
                   </p>
-                  <div className="small text-muted">
-                    #{item.id} · {item.model_name} · {statusLabel(item)}
-                    {item.provider ? ` · ${PROVIDER_BADGE[item.provider] || item.provider}` : ""}
-                  </div>
-                  {(item.provider_cost_usd != null ||
-                    (item.status !== "failed" && item.estimated_cost_usd != null) ||
-                    item.site_ready_seconds != null) && (
-                    <div className="small text-muted">
-                      {item.provider_cost_usd != null
-                        ? `${formatUsd(item.provider_cost_usd)} Moonez`
-                        : item.status !== "failed" && item.estimated_cost_usd != null
-                          ? `~${formatUsd(item.estimated_cost_usd)} оценка`
-                          : null}
-                      {item.site_ready_seconds != null && (
-                        <>
-                          {(item.provider_cost_usd != null ||
-                            (item.status !== "failed" && item.estimated_cost_usd != null)) &&
-                            " · "}
-                          {formatDurationSeconds(item.site_ready_seconds)} до скачивания
-                          <span
-                            className="text-muted"
-                            title="У Moonez «обработка» — только GPU. Наше время включает их очередь и наши ретраи."
-                          >
-                            {" "}
-                            (с их очередью
-                            {Number(item.retry_count) > 0
-                              ? `, ${item.retry_count} ${
-                                  Number(item.retry_count) === 1
-                                    ? "ретрай"
-                                    : Number(item.retry_count) < 5
-                                      ? "ретрая"
-                                      : "ретраев"
-                                }`
-                              : ""}
-                            )
-                          </span>
-                        </>
-                      )}
+                  <div className="gallery-meta">
+                    <div className="gallery-meta__row">
+                      <span className="gallery-meta__id">#{item.id}</span>
+                      <span className="gallery-meta__model" title={item.model_name || ""}>
+                        {shortModelName(item.model_name)}
+                      </span>
+                      <span
+                        className={`gallery-meta__status gallery-meta__status--${item.status || "unknown"}`}
+                        title={statusLabel(item)}
+                      >
+                        {item.status === "completed" && item.persist_pending
+                          ? "сохраняем"
+                          : item.status === "completed"
+                            ? "готово"
+                            : item.status === "failed"
+                              ? "ошибка"
+                              : item.status === "running"
+                                ? "Moonez"
+                                : item.status === "pending"
+                                  ? "очередь"
+                                  : statusLabel(item)}
+                      </span>
                     </div>
-                  )}
-                  {item.provider_job_id ? (
-                    <button
-                      type="button"
-                      className="btn btn-link btn-sm p-0 copy-id"
-                      title="Скопировать id задачи Moonez"
-                      onClick={() => copyText(item.provider_job_id, "Moonez job id")}
-                    >
-                      Moonez: {shortJobId(item.provider_job_id)}
-                    </button>
-                  ) : null}
+                    <div className="gallery-meta__row gallery-meta__stats">
+                      {item.provider_cost_usd != null ? (
+                        <span className="gallery-meta__price">{formatUsd(item.provider_cost_usd)}</span>
+                      ) : item.status !== "failed" && item.estimated_cost_usd != null ? (
+                        <span className="gallery-meta__price gallery-meta__price--est">
+                          ~{formatUsd(item.estimated_cost_usd)}
+                        </span>
+                      ) : null}
+                      {item.site_ready_seconds != null ? (
+                        <span
+                          className="gallery-meta__time"
+                          title="Клик → скачать. Включает очередь Moonez и наши ретраи."
+                        >
+                          {formatDurationSeconds(item.site_ready_seconds)}
+                        </span>
+                      ) : null}
+                      {Number(item.retry_count) > 0 ? (
+                        <span className="gallery-meta__retries">
+                          {item.retry_count} {retryWord(Number(item.retry_count))}
+                        </span>
+                      ) : null}
+                      {item.provider_job_id ? (
+                        <button
+                          type="button"
+                          className="btn btn-link btn-sm p-0 gallery-meta__job"
+                          title="Скопировать id задачи Moonez"
+                          onClick={() => copyText(item.provider_job_id, "Moonez job id")}
+                        >
+                          {shortJobId(item.provider_job_id)}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                   {item.rewritten_prompt && <div className="small text-success mt-1">Промпт переписан GPT</div>}
                   {item.error_message && <div className="small text-danger mt-1">{item.error_message}</div>}
                   <div className="d-flex flex-wrap gap-1 mt-2">

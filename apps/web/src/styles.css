@@ -1415,6 +1415,114 @@ button.info-btn:hover,
     font-size: 0.78rem;
 }
 
+.gallery-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.15rem;
+}
+
+.gallery-meta__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.55rem;
+    font-size: 0.78rem;
+    line-height: 1.25;
+}
+
+.gallery-meta__id {
+    color: var(--text-muted, #8b93a7);
+    font-variant-numeric: tabular-nums;
+}
+
+.gallery-meta__model {
+    font-weight: 650;
+    color: #7dd3fc;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+[data-bs-theme="light"] .gallery-meta__model {
+    color: #0369a1;
+}
+
+.gallery-meta__status {
+    color: var(--text-muted, #8b93a7);
+}
+
+.gallery-meta__status--completed {
+    color: #86efac;
+}
+
+.gallery-meta__status--failed {
+    color: #fca5a5;
+}
+
+.gallery-meta__status--running,
+.gallery-meta__status--pending {
+    color: #fde68a;
+}
+
+[data-bs-theme="light"] .gallery-meta__status--completed {
+    color: #15803d;
+}
+
+[data-bs-theme="light"] .gallery-meta__status--failed {
+    color: #b91c1c;
+}
+
+[data-bs-theme="light"] .gallery-meta__status--running,
+[data-bs-theme="light"] .gallery-meta__status--pending {
+    color: #a16207;
+}
+
+.gallery-meta__stats {
+    gap: 0.5rem 0.65rem;
+}
+
+.gallery-meta__price {
+    font-weight: 650;
+    color: #fbbf24;
+    font-variant-numeric: tabular-nums;
+}
+
+.gallery-meta__price--est {
+    opacity: 0.85;
+    font-weight: 600;
+}
+
+.gallery-meta__time {
+    font-weight: 650;
+    color: #c4b5fd;
+    font-variant-numeric: tabular-nums;
+}
+
+[data-bs-theme="light"] .gallery-meta__time {
+    color: #6d28d9;
+}
+
+.gallery-meta__retries {
+    font-weight: 600;
+    color: #fb923c;
+}
+
+[data-bs-theme="light"] .gallery-meta__retries {
+    color: #c2410c;
+}
+
+.gallery-meta__job {
+    font-size: 0.72rem !important;
+    color: var(--text-muted, #8b93a7) !important;
+    text-decoration: none !important;
+}
+
+.gallery-meta__job:hover {
+    color: #93c5fd !important;
+}
+
 .media-thumb > .mosaic-badge {
     position: absolute;
     top: 8px;

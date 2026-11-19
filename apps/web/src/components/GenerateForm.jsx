@@ -334,7 +334,7 @@ const GenerateForm = forwardRef(function GenerateForm({
       num_inference_steps: Number(steps),
       seed: seed === "" ? null : Number(seed),
       rewrite_prompt: rewrite,
-      // Text-to-image must not keep stale refs from the other tab.
+      // Refs stay in UI across tabs; only this tab's Generate sends them.
       reference_images: useRefs ? refs.map((r) => r.dataUrl) : [],
     });
   }
@@ -350,11 +350,7 @@ const GenerateForm = forwardRef(function GenerateForm({
             <button
               type="button"
               className={`btn ${mode === "text-to-image" ? "btn-primary" : "btn-outline-primary"}`}
-              onClick={() => {
-                setMode("text-to-image");
-                setRefs([]);
-                setMosaicRefs([null, null, null, null]);
-              }}
+              onClick={() => setMode("text-to-image")}
             >
               Text-to-Image
             </button>
