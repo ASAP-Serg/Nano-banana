@@ -138,7 +138,9 @@ class Settings(BaseSettings):
     MAX_POLICY_GPT_RETRIES: int = 2
 
     MAX_WORKERS: int = 1
-    MAX_CONCURRENT_GENERATIONS: int = 1
+    # Soft cap per user (pending+running+paused). Lets queue while Moonez draws.
+    MAX_CONCURRENT_GENERATIONS: int = 5
+
 
     CORS_ORIGINS: str = "http://localhost:8000"
     API_URL: str = "http://localhost:8000"

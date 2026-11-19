@@ -104,6 +104,10 @@ export default function Gallery({
                             (item.status !== "failed" && item.estimated_cost_usd != null)) &&
                             " · "}
                           {formatDurationSeconds(item.site_ready_seconds)} до скачивания
+                          <span className="text-muted" title="У Moonez «обработка» — только GPU. Наше время включает их очередь queued.">
+                            {" "}
+                            (с их очередью)
+                          </span>
                         </>
                       )}
                     </div>

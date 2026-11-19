@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -400,48 +401,59 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                         (generation.completed_at - started_at).total_seconds(),
                     )
 
-                    def _on_download_progress(done: int, total: int | None) -> None:
-                        queue.refresh_lock(generation_id)
+                    # Persist in a daemon thread — never block the worker. RU VPS→CDN
+                    # downloads often hang; ThreadPoolExecutor.shutdown waited on them
+                    # even after timeout and starved the next Moonez jobs.
+                    result_snapshot = dict(result) if isinstance(result, dict) else result
+                    gen_id_snap = int(generation_id)
 
-                    # RU VPS → Cloudflare CDN can hang for minutes and block the whole
-                    # worker (next gens never reach Moonez). Cap persist; keep CDN fallback.
-                    upload_result = None
-                    try:
-                        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-
-                        with ThreadPoolExecutor(max_workers=1) as pool:
-                            fut = pool.submit(
-                                persist_generation_result,
+                    def _persist_in_background() -> None:
+                        try:
+                            upload_result = persist_generation_result(
                                 get_storage(),
-                                result,
-                                on_progress=_on_download_progress,
+                                result_snapshot,
+                                on_progress=None,
                             )
-                            try:
-                                upload_result = fut.result(timeout=45)
-                            except FuturesTimeout:
-                                logger.warning(
-                                    "[GENERATION] MinIO persist timed out gen=%s (CDN fallback active)",
-                                    generation_id,
+                        except Exception:
+                            logger.exception(
+                                "[GENERATION] MinIO persist failed gen=%s (CDN fallback active)",
+                                gen_id_snap,
+                            )
+                            return
+                        if not upload_result:
+                            logger.warning(
+                                "[GENERATION] %s MinIO persist empty — CDN fallback remains",
+                                gen_id_snap,
+                            )
+                            return
+                        try:
+                            with db_service.get_session() as bg_session:
+                                row = (
+                                    bg_session.query(Generation)
+                                    .filter(Generation.id == gen_id_snap)
+                                    .first()
                                 )
-                                return
-                    except Exception:
-                        logger.exception(
-                            "[GENERATION] MinIO persist failed gen=%s (CDN fallback active)",
-                            generation_id,
-                        )
-                        return
-                    if upload_result:
-                        generation.result_url = upload_result["path"]
-                        generation.result_path = upload_result["path"]
-                        generation.generation_metadata["persist_pending"] = False
-                        flag_modified(generation, "generation_metadata")
-                        session.commit()
-                        logger.info("[GENERATION] %s persisted to MinIO", generation_id)
-                    else:
-                        logger.warning(
-                            "[GENERATION] %s MinIO persist empty — CDN fallback remains",
-                            generation_id,
-                        )
+                                if not row:
+                                    return
+                                row.result_url = upload_result["path"]
+                                row.result_path = upload_result["path"]
+                                meta = dict(row.generation_metadata or {})
+                                meta["persist_pending"] = False
+                                row.generation_metadata = meta
+                                flag_modified(row, "generation_metadata")
+                                bg_session.commit()
+                            logger.info("[GENERATION] %s persisted to MinIO (bg)", gen_id_snap)
+                        except Exception:
+                            logger.exception(
+                                "[GENERATION] MinIO persist DB update failed gen=%s",
+                                gen_id_snap,
+                            )
+
+                    threading.Thread(
+                        target=_persist_in_background,
+                        name=f"persist-{gen_id_snap}",
+                        daemon=True,
+                    ).start()
                     return
 
                 try:
