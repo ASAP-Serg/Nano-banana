@@ -98,11 +98,9 @@ export async function downloadImage(imageUrl, prompt) {
     return;
   }
   try {
-    // Always our /file?download=1 — MinIO bytes (or server-side Moonez fetch).
-    // Browser never talks to cdn.rendergrid.io.
     const response = await fetch(downloadFileUrl(imageUrl), {
       credentials: "include",
-      headers: { Accept: "image/*,application/json,*/*" },
+      headers: { Accept: "application/json,image/*,*/*" },
     });
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
@@ -115,10 +113,22 @@ export async function downloadImage(imageUrl, prompt) {
       throw new Error(detail);
     }
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    let blob;
     if (contentType.includes("application/json")) {
-      throw new Error("Файл ещё сохраняется. Подождите и нажмите ещё раз.");
+      const payload = await response.json();
+      const cdnUrl = typeof payload?.url === "string" ? payload.url : "";
+      if (!/^https?:\/\//i.test(cdnUrl)) throw new Error("Нет ссылки на файл");
+      const cdnRes = await fetch(cdnUrl, { credentials: "omit", mode: "cors", referrerPolicy: "no-referrer" });
+      if (!cdnRes.ok) {
+        window.open(cdnUrl, "_blank", "noopener,noreferrer");
+        toast("Открыл оригинал — сохрани через браузер");
+        return;
+      }
+      blob = await cdnRes.blob();
+    } else {
+      blob = await response.blob();
     }
-    triggerBlobDownload(await response.blob(), prompt);
+    triggerBlobDownload(blob, prompt);
     toast("Изображение скачано");
   } catch (err) {
     try {

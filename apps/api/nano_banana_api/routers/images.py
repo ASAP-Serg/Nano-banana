@@ -5,7 +5,7 @@ import logging
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm.attributes import flag_modified
 
 from nano_banana.auth import auth_service
@@ -484,37 +484,41 @@ async def get_generation_file(
         if not source and not provider_url:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
 
-    # Never 302 the browser to cdn.rendergrid.io (Wiki ISP resets it).
-    # 1) MinIO  2) server-side fetch from Moonez CDN + persist for next time.
+    # MinIO first (fast, same for everyone). If missing — hand CDN to the
+    # browser immediately. NEVER block the request on VPS→CDN download:
+    # that hung the whole gallery (all /file Pending).
     got = _minio_bytes(source)
     if got:
         return _media_bytes_response(got[0], got[1], download=download)
 
     if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
         from nano_banana.security import assert_safe_outbound_image_url
-        from starlette.concurrency import run_in_threadpool
-
-        from nano_banana.storage.results import download_image_from_url, persist_generation_result
 
         try:
             assert_safe_outbound_image_url(provider_url, settings)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
 
-        data = await run_in_threadpool(download_image_from_url, provider_url)
-        if data:
-            # Backfill MinIO so the next gallery load is instant for everyone.
-            def _persist_bytes() -> None:
+        # Kick MinIO persist in background (daemon) without blocking response.
+        if persist_pending:
+            import threading
+
+            from nano_banana.storage.results import persist_generation_result
+
+            snap_url = provider_url
+            gen_id = generation_id
+
+            def _bg_persist() -> None:
                 try:
                     upload = persist_generation_result(
                         _storage(),
-                        {"image_data": data},
+                        {"image_url": snap_url},
                         on_progress=None,
                     )
                     if not upload:
                         return
                     with db_service.get_session() as bg:
-                        row = bg.query(Generation).filter(Generation.id == generation_id).first()
+                        row = bg.query(Generation).filter(Generation.id == gen_id).first()
                         if not row:
                             return
                         row.result_url = upload["path"]
@@ -525,23 +529,19 @@ async def get_generation_file(
                         row.generation_metadata = meta2
                         flag_modified(row, "generation_metadata")
                         bg.commit()
+                    logger.info("[GENERATION] %s MinIO persist ok (lazy)", gen_id)
                 except Exception:
-                    logger.exception("MinIO backfill failed gen=%s", generation_id)
+                    logger.exception("Lazy MinIO persist failed gen=%s", gen_id)
 
-            import threading
+            threading.Thread(target=_bg_persist, name=f"persist-lazy-{gen_id}", daemon=True).start()
 
-            threading.Thread(
-                target=_persist_bytes,
-                name=f"backfill-{generation_id}",
-                daemon=True,
-            ).start()
-            return _media_bytes_response(data, "image/jpeg", download=download)
+        if download:
+            return JSONResponse(
+                {"url": provider_url},
+                headers={"Cache-Control": "private, no-store"},
+            )
+        return RedirectResponse(url=provider_url, status_code=302)
 
-    if persist_pending:
-        raise HTTPException(
-            status_code=503,
-            detail="Файл ещё сохраняется на сервер. Обновите через несколько секунд.",
-        )
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 
 
