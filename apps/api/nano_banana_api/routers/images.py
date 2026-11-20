@@ -480,9 +480,23 @@ async def get_generation_file(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
         if download:
-            # Don't proxy CDN via RU VPS (slow/502). Hand the URL to the browser.
+            # Many RU clients (Wiki jam: ERR_CONNECTION_RESET) cannot reach
+            # cdn.rendergrid.io from the browser. Prefer server-side fetch so
+            # download works even when MinIO persist is still pending.
+            from starlette.concurrency import run_in_threadpool
+
+            from nano_banana.storage.results import download_image_from_url
+
+            data = await run_in_threadpool(download_image_from_url, provider_url)
+            if data:
+                return _media_bytes_response(data, "image/jpeg", download=True)
+            # Last resort: hand CDN URL to clients that can reach it.
             return JSONResponse(
-                {"url": provider_url},
+                {
+                    "url": provider_url,
+                    "error": "cdn_fetch_failed",
+                    "hint": "CDN недоступен с сервера; подождите сохранения в MinIO и повторите.",
+                },
                 headers={"Cache-Control": "private, no-store"},
             )
         # Preview: browser loads CDN directly (home ISP is faster than RU VPS hop).

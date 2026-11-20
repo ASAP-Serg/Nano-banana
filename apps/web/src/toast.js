@@ -119,20 +119,23 @@ export async function downloadImage(imageUrl, prompt) {
     if (contentType.includes("application/json")) {
       const payload = await response.json();
       const cdnUrl = typeof payload?.url === "string" ? payload.url : "";
-      if (!/^https?:\/\//i.test(cdnUrl)) throw new Error("Нет ссылки на файл");
+      if (!/^https?:\/\//i.test(cdnUrl)) {
+        throw new Error(payload?.hint || "Нет ссылки на файл");
+      }
       try {
         blob = await blobFromCdn(cdnUrl);
       } catch (cdnErr) {
-        // CORS/extension block — open CDN tab so user can save natively.
-        window.open(cdnUrl, "_blank", "noopener,noreferrer");
-        toast("Открыл оригинал — сохрани через браузер");
+        // Wiki jam: net::ERR_CONNECTION_RESET to cdn.rendergrid.io — browser
+        // cannot reach Moonez CDN. Popup after await is often blocked too.
         try {
           const { reportError } = await import("./errorReporter.js");
           reportError(cdnErr, "download-cdn", { path: cdnUrl.slice(0, 300) });
         } catch {
           /* ignore */
         }
-        return;
+        throw new Error(
+          "CDN Moonez недоступен из вашей сети. Подождите 20–40 сек (файл сохранится у нас) и нажмите «Скачать» ещё раз."
+        );
       }
     } else {
       blob = await response.blob();
