@@ -92,10 +92,34 @@ function triggerBlobDownload(blob, prompt) {
   window.URL.revokeObjectURL(url);
 }
 
+function isAllowedDownloadTarget(url) {
+  const s = String(url || "").trim();
+  if (!s) return false;
+  // Same-origin Moonez CDN proxy (nginx /rg-cdn/ → rendergrid).
+  if (s.startsWith("/rg-cdn/images/")) return true;
+  try {
+    const u = new URL(s, window.location.origin);
+    if (u.origin === window.location.origin && u.pathname.startsWith("/rg-cdn/images/")) {
+      return true;
+    }
+    return /^https?:\/\//i.test(s);
+  } catch {
+    return false;
+  }
+}
+
 async function blobFromCdn(cdnUrl) {
+  const sameOrigin = String(cdnUrl).startsWith("/")
+    || (() => {
+      try {
+        return new URL(cdnUrl, window.location.origin).origin === window.location.origin;
+      } catch {
+        return false;
+      }
+    })();
   const response = await fetch(cdnUrl, {
     credentials: "omit",
-    mode: "cors",
+    mode: sameOrigin ? "same-origin" : "cors",
     referrerPolicy: "no-referrer",
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -108,34 +132,39 @@ export async function downloadImage(imageUrl, prompt) {
     return;
   }
   try {
-    // Auth on our /file?download=1: MinIO bytes, or JSON {url} for Moonez CDN.
+    // Auth on our /file?download=1: MinIO bytes, or JSON {url} (/rg-cdn or CDN).
     const response = await fetch(downloadFileUrl(imageUrl), {
       credentials: "include",
       headers: { Accept: "application/json,image/*,*/*" },
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      let detail = `HTTP ${response.status}`;
+      try {
+        const errBody = await response.json();
+        if (errBody?.detail) detail = String(errBody.detail);
+      } catch {
+        /* ignore */
+      }
+      throw new Error(detail);
+    }
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
     let blob;
     if (contentType.includes("application/json")) {
       const payload = await response.json();
       const cdnUrl = typeof payload?.url === "string" ? payload.url : "";
-      if (!/^https?:\/\//i.test(cdnUrl)) {
+      if (!isAllowedDownloadTarget(cdnUrl)) {
         throw new Error(payload?.hint || "Нет ссылки на файл");
       }
       try {
         blob = await blobFromCdn(cdnUrl);
       } catch (cdnErr) {
-        // Wiki jam: net::ERR_CONNECTION_RESET to cdn.rendergrid.io — browser
-        // cannot reach Moonez CDN. Popup after await is often blocked too.
         try {
           const { reportError } = await import("./errorReporter.js");
           reportError(cdnErr, "download-cdn", { path: cdnUrl.slice(0, 300) });
         } catch {
           /* ignore */
         }
-        throw new Error(
-          "CDN Moonez недоступен из вашей сети. Подождите 20–40 сек (файл сохранится у нас) и нажмите «Скачать» ещё раз."
-        );
+        throw new Error("Не удалось скачать изображение (CDN). Обнови страницу и попробуй ещё раз.");
       }
     } else {
       blob = await response.blob();

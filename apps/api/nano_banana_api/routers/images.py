@@ -445,6 +445,33 @@ def _media_bytes_response(data: bytes, content_type: str, *, download: bool = Fa
     )
 
 
+def _minio_bytes(source: Optional[str]):
+    if not source or not isinstance(source, str):
+        return None
+    # Client-facing /api/.../file URLs are not MinIO keys.
+    if source.startswith(("/api/", "http://", "https://")):
+        return None
+    try:
+        return _storage().get_object_bytes(source)
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def _rendergrid_via_our_cdn(provider_url: str) -> Optional[str]:
+    """Rewrite Moonez CDN URL to same-origin /rg-cdn/... (nginx → rendergrid)."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse((provider_url or "").strip())
+    host = (parsed.hostname or "").lower()
+    if not host.endswith("rendergrid.io"):
+        return None
+    path = parsed.path or ""
+    if not path.startswith("/images/"):
+        return None
+    q = f"?{parsed.query}" if parsed.query else ""
+    return f"/rg-cdn{path}{q}"
+
+
 @router.get("/{generation_id}/file")
 async def get_generation_file(
     generation_id: int,
@@ -465,13 +492,11 @@ async def get_generation_file(
         provider_url = meta.get("provider_image_url") if isinstance(meta, dict) else None
         if not source and not provider_url:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
-    if source:
-        try:
-            data, content_type = _storage().get_object_bytes(source)
-            return _media_bytes_response(data, content_type, download=download)
-        except (FileNotFoundError, ValueError):
-            # MinIO ещё нет — ниже fallback на CDN провайдера.
-            pass
+
+    got = _minio_bytes(source)
+    if got:
+        return _media_bytes_response(got[0], got[1], download=download)
+
     if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
         from nano_banana.security import assert_safe_outbound_image_url
 
@@ -479,28 +504,21 @@ async def get_generation_file(
             assert_safe_outbound_image_url(provider_url, settings)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
+
+        # Prefer same-origin CDN proxy so RU clients that cannot reach
+        # cdn.rendergrid.io (ERR_CONNECTION_RESET) still get the image fast.
+        proxied = _rendergrid_via_our_cdn(provider_url)
         if download:
-            # Many RU clients (Wiki jam: ERR_CONNECTION_RESET) cannot reach
-            # cdn.rendergrid.io from the browser. Prefer server-side fetch so
-            # download works even when MinIO persist is still pending.
-            from starlette.concurrency import run_in_threadpool
-
-            from nano_banana.storage.results import download_image_from_url
-
-            data = await run_in_threadpool(download_image_from_url, provider_url)
-            if data:
-                return _media_bytes_response(data, "image/jpeg", download=True)
-            # Last resort: hand CDN URL to clients that can reach it.
+            if proxied:
+                return JSONResponse(
+                    {"url": proxied},
+                    headers={"Cache-Control": "private, no-store"},
+                )
             return JSONResponse(
-                {
-                    "url": provider_url,
-                    "error": "cdn_fetch_failed",
-                    "hint": "CDN недоступен с сервера; подождите сохранения в MinIO и повторите.",
-                },
+                {"url": provider_url},
                 headers={"Cache-Control": "private, no-store"},
             )
-        # Preview: browser loads CDN directly (home ISP is faster than RU VPS hop).
-        return RedirectResponse(url=provider_url, status_code=302)
+        return RedirectResponse(url=proxied or provider_url, status_code=302)
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 
 
