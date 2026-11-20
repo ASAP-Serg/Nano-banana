@@ -20,6 +20,9 @@ function emptyThumbLabel(item) {
   if (item.status === "paused") return item.status_detail || "пауза";
   if (item.status === "running") return item.status_detail || "генерация…";
   if (item.status === "pending") return item.status_detail || "очередь…";
+  if (item.persist_pending || (item.status === "completed" && !item.result_url)) {
+    return item.status_detail || "сохранение…";
+  }
   return item.status_detail || item.status || "нет фото";
 }
 
@@ -75,11 +78,15 @@ export default function Gallery({
                       src={item.result_url}
                       className="generation-image"
                       alt=""
+                      loading="lazy"
                       onClick={() => onOpen(idx)}
                     />
                   ) : (
                     <div className="media-thumb-empty">
-                      {item.status === "pending" || item.status === "running" ? (
+                      {item.status === "pending"
+                        || item.status === "running"
+                        || item.persist_pending
+                        || (item.status === "completed" && !item.result_url) ? (
                         <div className="spinner-border" role="status" />
                       ) : null}
                       <div className="mt-2">{emptyThumbLabel(item)}</div>

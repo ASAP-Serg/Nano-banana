@@ -92,50 +92,17 @@ function triggerBlobDownload(blob, prompt) {
   window.URL.revokeObjectURL(url);
 }
 
-function isAllowedDownloadTarget(url) {
-  const s = String(url || "").trim();
-  if (!s) return false;
-  // Same-origin Moonez CDN proxy (nginx /rg-cdn/ → rendergrid).
-  if (s.startsWith("/rg-cdn/images/")) return true;
-  try {
-    const u = new URL(s, window.location.origin);
-    if (u.origin === window.location.origin && u.pathname.startsWith("/rg-cdn/images/")) {
-      return true;
-    }
-    return /^https?:\/\//i.test(s);
-  } catch {
-    return false;
-  }
-}
-
-async function blobFromCdn(cdnUrl) {
-  const sameOrigin = String(cdnUrl).startsWith("/")
-    || (() => {
-      try {
-        return new URL(cdnUrl, window.location.origin).origin === window.location.origin;
-      } catch {
-        return false;
-      }
-    })();
-  const response = await fetch(cdnUrl, {
-    credentials: "omit",
-    mode: sameOrigin ? "same-origin" : "cors",
-    referrerPolicy: "no-referrer",
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.blob();
-}
-
 export async function downloadImage(imageUrl, prompt) {
   if (!isSafeMediaUrl(imageUrl)) {
     toast("Некорректная ссылка на изображение", "error");
     return;
   }
   try {
-    // Auth on our /file?download=1: MinIO bytes, or JSON {url} (/rg-cdn or CDN).
+    // Always our /file?download=1 — MinIO bytes (or server-side Moonez fetch).
+    // Browser never talks to cdn.rendergrid.io.
     const response = await fetch(downloadFileUrl(imageUrl), {
       credentials: "include",
-      headers: { Accept: "application/json,image/*,*/*" },
+      headers: { Accept: "image/*,application/json,*/*" },
     });
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
@@ -148,28 +115,10 @@ export async function downloadImage(imageUrl, prompt) {
       throw new Error(detail);
     }
     const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    let blob;
     if (contentType.includes("application/json")) {
-      const payload = await response.json();
-      const cdnUrl = typeof payload?.url === "string" ? payload.url : "";
-      if (!isAllowedDownloadTarget(cdnUrl)) {
-        throw new Error(payload?.hint || "Нет ссылки на файл");
-      }
-      try {
-        blob = await blobFromCdn(cdnUrl);
-      } catch (cdnErr) {
-        try {
-          const { reportError } = await import("./errorReporter.js");
-          reportError(cdnErr, "download-cdn", { path: cdnUrl.slice(0, 300) });
-        } catch {
-          /* ignore */
-        }
-        throw new Error("Не удалось скачать изображение (CDN). Обнови страницу и попробуй ещё раз.");
-      }
-    } else {
-      blob = await response.blob();
+      throw new Error("Файл ещё сохраняется. Подождите и нажмите ещё раз.");
     }
-    triggerBlobDownload(blob, prompt);
+    triggerBlobDownload(await response.blob(), prompt);
     toast("Изображение скачано");
   } catch (err) {
     try {

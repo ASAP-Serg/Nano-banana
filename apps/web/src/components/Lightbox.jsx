@@ -61,7 +61,11 @@ export default function Lightbox({ items, index, onClose, onIndex }) {
           </button>
         )}
         {safeUrl ? (
-          <img src={safeUrl} alt="" style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 8 }} />
+          <img
+            src={safeUrl}
+            alt=""
+            style={{ maxWidth: "100%", maxHeight: "75vh", objectFit: "contain", borderRadius: 8 }}
+          />
         ) : (
           <div className="text-light p-4">Изображение недоступно</div>
         )}

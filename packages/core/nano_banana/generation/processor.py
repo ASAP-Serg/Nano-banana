@@ -391,12 +391,14 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                         return
                     generation.generation_metadata["provider_image_url"] = provider_url
                     generation.generation_metadata["persist_pending"] = True
+                    generation.generation_metadata["status_detail"] = "Сохраняем на сервер…"
                     flag_modified(generation, "generation_metadata")
+                    # completed для очереди, но gallery ждёт MinIO (без CDN в браузере).
                     generation.status = "completed"
                     generation.completed_at = datetime.utcnow()
                     session.commit()
                     logger.info(
-                        "[GENERATION] %s ready via provider CDN in %.1fs (MinIO persist follows)",
+                        "[GENERATION] %s Moonez done in %.1fs — persisting to MinIO (no browser CDN)",
                         generation_id,
                         (generation.completed_at - started_at).total_seconds(),
                     )
@@ -439,6 +441,7 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                                 row.result_path = upload_result["path"]
                                 meta = dict(row.generation_metadata or {})
                                 meta["persist_pending"] = False
+                                meta.pop("status_detail", None)
                                 row.generation_metadata = meta
                                 flag_modified(row, "generation_metadata")
                                 bg_session.commit()

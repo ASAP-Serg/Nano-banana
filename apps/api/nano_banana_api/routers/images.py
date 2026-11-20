@@ -5,7 +5,7 @@ import logging
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm.attributes import flag_modified
 
 from nano_banana.auth import auth_service
@@ -475,37 +475,34 @@ async def get_generation_file(
         source = getattr(generation, "result_path", None) or generation.result_url
         meta = generation.generation_metadata or {}
         provider_url = meta.get("provider_image_url") if isinstance(meta, dict) else None
+        persist_pending = bool(isinstance(meta, dict) and meta.get("persist_pending"))
         if not source and not provider_url:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
 
+    # Stable for all users: serve only from our MinIO. Never 302 the browser
+    # to cdn.rendergrid.io (some RU ISPs reset that host — Wiki jam).
     got = _minio_bytes(source)
     if got:
         return _media_bytes_response(got[0], got[1], download=download)
 
-    if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
+    if download and isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
         from nano_banana.security import assert_safe_outbound_image_url
+        from starlette.concurrency import run_in_threadpool
+
+        from nano_banana.storage.results import download_image_from_url
 
         try:
             assert_safe_outbound_image_url(provider_url, settings)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
-
-        # Preview must be instant: never block on VPS→CDN fetch (hangs gallery).
-        if not download:
-            return RedirectResponse(url=provider_url, status_code=302)
-
-        # Download: try server-side fetch for clients that cannot open CDN
-        # (Wiki ERR_CONNECTION_RESET); fall back to handing the CDN URL.
-        from starlette.concurrency import run_in_threadpool
-
-        from nano_banana.storage.results import download_image_from_url
-
         data = await run_in_threadpool(download_image_from_url, provider_url)
         if data:
             return _media_bytes_response(data, "image/jpeg", download=True)
-        return JSONResponse(
-            {"url": provider_url},
-            headers={"Cache-Control": "private, no-store"},
+
+    if persist_pending:
+        raise HTTPException(
+            status_code=503,
+            detail="Файл ещё сохраняется на сервер. Обновите через несколько секунд.",
         )
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 
