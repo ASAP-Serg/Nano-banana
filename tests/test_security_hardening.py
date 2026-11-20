@@ -421,8 +421,21 @@ class TestResidualRemoteSurface(unittest.TestCase):
                 "persist_pending": True,
             },
         )
-        # Pending persist: still our /file URL (server fetches CDN; browser never hits rendergrid).
-        self.assertEqual(client_result_url(pending), "/api/v1/images/10/file")
+        # Pending persist: browser gets CDN directly (VPN / foreign ISP); RU VPS can't fill MinIO.
+        self.assertEqual(
+            client_result_url(pending),
+            "https://cdn.rendergrid.io/images/x.jpg",
+        )
+        legacy_cdn = SimpleNamespace(
+            id=12,
+            result_path=None,
+            result_url="https://cdn.rendergrid.io/images/legacy.jpg",
+            generation_metadata={},
+        )
+        self.assertEqual(
+            client_result_url(legacy_cdn),
+            "https://cdn.rendergrid.io/images/legacy.jpg",
+        )
         empty = SimpleNamespace(id=11, result_path=None, result_url=None, generation_metadata={})
         self.assertIsNone(client_result_url(empty))
 

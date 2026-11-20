@@ -45,17 +45,47 @@ export function toast(message, type = "success") {
   }, 3500);
 }
 
+const CDN_HOST_SUFFIXES = [
+  "rendergrid.io",
+  "moonez.ai",
+  "replicate.delivery",
+  "replicate.com",
+  "googleusercontent.com",
+  "storage.googleapis.com",
+];
+
+function isAllowedCdnHost(hostname) {
+  const host = String(hostname || "")
+    .toLowerCase()
+    .replace(/\.$/, "");
+  if (!host) return false;
+  return CDN_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
 export function isSafeMediaUrl(url) {
   if (!url || typeof url !== "string") return false;
   const value = url.trim();
   if (!value || value.includes("..")) return false;
   try {
     const parsed = new URL(value, window.location.origin);
-    if (parsed.origin !== window.location.origin) return false;
-    return /^\/api\/v1\/images\/\d+\/(file|reference\/\d+)\/?$/.test(parsed.pathname);
+    if (parsed.origin === window.location.origin) {
+      return /^\/api\/v1\/images\/\d+\/(file|reference\/\d+)\/?$/.test(parsed.pathname);
+    }
+    // Moonez CDN while MinIO persist is pending — VPN / foreign ISP path.
+    return parsed.protocol === "https:" && isAllowedCdnHost(parsed.hostname);
   } catch {
     return false;
   }
+}
+
+function openCdnDownload(cdnUrl) {
+  const a = document.createElement("a");
+  a.href = cdnUrl;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 function downloadFileUrl(imageUrl) {
@@ -98,6 +128,18 @@ export async function downloadImage(imageUrl, prompt) {
     return;
   }
   try {
+    // Direct CDN URL (persist pending): don't fetch via CORS — just open.
+    try {
+      const abs = new URL(imageUrl, window.location.origin);
+      if (abs.origin !== window.location.origin && isAllowedCdnHost(abs.hostname)) {
+        openCdnDownload(abs.href);
+        toast("Открыл оригинал — сохрани через браузер");
+        return;
+      }
+    } catch {
+      /* fall through to /file */
+    }
+
     const response = await fetch(downloadFileUrl(imageUrl), {
       credentials: "include",
       headers: { Accept: "application/json,image/*,*/*" },
@@ -117,14 +159,20 @@ export async function downloadImage(imageUrl, prompt) {
     if (contentType.includes("application/json")) {
       const payload = await response.json();
       const cdnUrl = typeof payload?.url === "string" ? payload.url : "";
-      if (!/^https?:\/\//i.test(cdnUrl)) throw new Error("Нет ссылки на файл");
-      const cdnRes = await fetch(cdnUrl, { credentials: "omit", mode: "cors", referrerPolicy: "no-referrer" });
-      if (!cdnRes.ok) {
-        window.open(cdnUrl, "_blank", "noopener,noreferrer");
+      if (!/^https:\/\//i.test(cdnUrl)) throw new Error("Нет ссылки на файл");
+      try {
+        const cdnRes = await fetch(cdnUrl, {
+          credentials: "omit",
+          mode: "cors",
+          referrerPolicy: "no-referrer",
+        });
+        if (!cdnRes.ok) throw new Error(`CDN HTTP ${cdnRes.status}`);
+        blob = await cdnRes.blob();
+      } catch {
+        openCdnDownload(cdnUrl);
         toast("Открыл оригинал — сохрани через браузер");
         return;
       }
-      blob = await cdnRes.blob();
     } else {
       blob = await response.blob();
     }

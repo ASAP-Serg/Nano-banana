@@ -480,6 +480,9 @@ async def get_generation_file(
         source = getattr(generation, "result_path", None) or generation.result_url
         meta = generation.generation_metadata or {}
         provider_url = meta.get("provider_image_url") if isinstance(meta, dict) else None
+        # Old rows may store the CDN URL in result_url without provider_image_url.
+        if not provider_url and isinstance(source, str) and source.startswith(("https://", "http://")):
+            provider_url = source
         persist_pending = bool(isinstance(meta, dict) and meta.get("persist_pending"))
         if not source and not provider_url:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
