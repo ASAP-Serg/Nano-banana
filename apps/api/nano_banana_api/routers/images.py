@@ -457,21 +457,6 @@ def _minio_bytes(source: Optional[str]):
         return None
 
 
-def _rendergrid_via_our_cdn(provider_url: str) -> Optional[str]:
-    """Rewrite Moonez CDN URL to same-origin /rg-cdn/... (nginx → rendergrid)."""
-    from urllib.parse import urlparse
-
-    parsed = urlparse((provider_url or "").strip())
-    host = (parsed.hostname or "").lower()
-    if not host.endswith("rendergrid.io"):
-        return None
-    path = parsed.path or ""
-    if not path.startswith("/images/"):
-        return None
-    q = f"?{parsed.query}" if parsed.query else ""
-    return f"/rg-cdn{path}{q}"
-
-
 @router.get("/{generation_id}/file")
 async def get_generation_file(
     generation_id: int,
@@ -505,20 +490,24 @@ async def get_generation_file(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
 
-        # Prefer same-origin CDN proxy so RU clients that cannot reach
-        # cdn.rendergrid.io (ERR_CONNECTION_RESET) still get the image fast.
-        proxied = _rendergrid_via_our_cdn(provider_url)
+        # nginx /rg-cdn is too slow (VPS→CF). Serve bytes via parallel-range
+        # fetch for clients that cannot open cdn.rendergrid.io themselves
+        # (Wiki). Others still get a direct CDN handoff below.
+        from starlette.concurrency import run_in_threadpool
+
+        from nano_banana.storage.results import download_image_from_url
+
+        data = await run_in_threadpool(download_image_from_url, provider_url)
+        if data:
+            return _media_bytes_response(data, "image/jpeg", download=download)
+
         if download:
-            if proxied:
-                return JSONResponse(
-                    {"url": proxied},
-                    headers={"Cache-Control": "private, no-store"},
-                )
             return JSONResponse(
                 {"url": provider_url},
                 headers={"Cache-Control": "private, no-store"},
             )
-        return RedirectResponse(url=proxied or provider_url, status_code=302)
+        # Preview: browser → CDN directly (fast when ISP allows it).
+        return RedirectResponse(url=provider_url, status_code=302)
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 
 
