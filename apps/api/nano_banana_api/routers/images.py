@@ -490,24 +490,23 @@ async def get_generation_file(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
 
-        # nginx /rg-cdn is too slow (VPS→CF). Serve bytes via parallel-range
-        # fetch for clients that cannot open cdn.rendergrid.io themselves
-        # (Wiki). Others still get a direct CDN handoff below.
+        # Preview must be instant: never block on VPS→CDN fetch (hangs gallery).
+        if not download:
+            return RedirectResponse(url=provider_url, status_code=302)
+
+        # Download: try server-side fetch for clients that cannot open CDN
+        # (Wiki ERR_CONNECTION_RESET); fall back to handing the CDN URL.
         from starlette.concurrency import run_in_threadpool
 
         from nano_banana.storage.results import download_image_from_url
 
         data = await run_in_threadpool(download_image_from_url, provider_url)
         if data:
-            return _media_bytes_response(data, "image/jpeg", download=download)
-
-        if download:
-            return JSONResponse(
-                {"url": provider_url},
-                headers={"Cache-Control": "private, no-store"},
-            )
-        # Preview: browser → CDN directly (fast when ISP allows it).
-        return RedirectResponse(url=provider_url, status_code=302)
+            return _media_bytes_response(data, "image/jpeg", download=True)
+        return JSONResponse(
+            {"url": provider_url},
+            headers={"Cache-Control": "private, no-store"},
+        )
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 
 
