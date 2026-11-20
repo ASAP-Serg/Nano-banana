@@ -312,6 +312,11 @@ async def list_generations(
                     site_ready = round((gen.completed_at - gen.created_at).total_seconds(), 1)
                 except Exception:
                     site_ready = None
+            result_url = client_result_url(gen)
+            extra = rewrite_metadata_fields(meta)
+            # Don't show "Монез готов, сохраняем…" when we already expose /file.
+            if result_url and extra.get("persist_pending"):
+                extra["status_detail"] = None
             item = ImageResponse(
                 id=gen.id,
                 user_id=gen.user_id,
@@ -320,7 +325,7 @@ async def list_generations(
                 generation_mode=gen.generation_mode,
                 resolution=gen.resolution,
                 aspect_ratio=gen.aspect_ratio,
-                result_url=client_result_url(gen),
+                result_url=result_url,
                 status=gen.status,
                 created_at=gen.created_at,
                 completed_at=gen.completed_at,
@@ -335,7 +340,7 @@ async def list_generations(
                     resolution=gen.resolution,
                     reference_count=int(meta.get("reference_images_count") or 0),
                 ),
-                **rewrite_metadata_fields(meta),
+                **extra,
             )
             data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
             if data.get("created_at"):
@@ -479,25 +484,58 @@ async def get_generation_file(
         if not source and not provider_url:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
 
-    # Stable for all users: serve only from our MinIO. Never 302 the browser
-    # to cdn.rendergrid.io (some RU ISPs reset that host — Wiki jam).
+    # Never 302 the browser to cdn.rendergrid.io (Wiki ISP resets it).
+    # 1) MinIO  2) server-side fetch from Moonez CDN + persist for next time.
     got = _minio_bytes(source)
     if got:
         return _media_bytes_response(got[0], got[1], download=download)
 
-    if download and isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
+    if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
         from nano_banana.security import assert_safe_outbound_image_url
         from starlette.concurrency import run_in_threadpool
 
-        from nano_banana.storage.results import download_image_from_url
+        from nano_banana.storage.results import download_image_from_url, persist_generation_result
 
         try:
             assert_safe_outbound_image_url(provider_url, settings)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
+
         data = await run_in_threadpool(download_image_from_url, provider_url)
         if data:
-            return _media_bytes_response(data, "image/jpeg", download=True)
+            # Backfill MinIO so the next gallery load is instant for everyone.
+            def _persist_bytes() -> None:
+                try:
+                    upload = persist_generation_result(
+                        _storage(),
+                        {"image_data": data},
+                        on_progress=None,
+                    )
+                    if not upload:
+                        return
+                    with db_service.get_session() as bg:
+                        row = bg.query(Generation).filter(Generation.id == generation_id).first()
+                        if not row:
+                            return
+                        row.result_url = upload["path"]
+                        row.result_path = upload["path"]
+                        meta2 = dict(row.generation_metadata or {})
+                        meta2["persist_pending"] = False
+                        meta2.pop("status_detail", None)
+                        row.generation_metadata = meta2
+                        flag_modified(row, "generation_metadata")
+                        bg.commit()
+                except Exception:
+                    logger.exception("MinIO backfill failed gen=%s", generation_id)
+
+            import threading
+
+            threading.Thread(
+                target=_persist_bytes,
+                name=f"backfill-{generation_id}",
+                daemon=True,
+            ).start()
+            return _media_bytes_response(data, "image/jpeg", download=download)
 
     if persist_pending:
         raise HTTPException(

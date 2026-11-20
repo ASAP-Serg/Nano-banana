@@ -421,8 +421,8 @@ class TestResidualRemoteSurface(unittest.TestCase):
                 "persist_pending": True,
             },
         )
-        # Pending MinIO persist: no browser URL (avoid Moonez CDN in the client).
-        self.assertIsNone(client_result_url(pending))
+        # Pending persist: still our /file URL (server fetches CDN; browser never hits rendergrid).
+        self.assertEqual(client_result_url(pending), "/api/v1/images/10/file")
         empty = SimpleNamespace(id=11, result_path=None, result_url=None, generation_metadata={})
         self.assertIsNone(client_result_url(empty))
 

@@ -1,4 +1,4 @@
-"""Клиентские URL картинок: только cookie-прокси на MinIO, без Moonez CDN в браузере."""
+"""Клиентские URL картинок: только наш /file proxy (MinIO или server-side CDN fetch)."""
 from __future__ import annotations
 
 from typing import List, Optional
@@ -13,7 +13,6 @@ def generation_reference_url(generation_id: int, index: int) -> str:
 
 
 def _is_storage_object_key(value: Optional[str]) -> bool:
-    """True for MinIO object keys; false for http(s) /api paths."""
     if not value or not isinstance(value, str):
         return False
     v = value.strip()
@@ -25,13 +24,17 @@ def _is_storage_object_key(value: Optional[str]) -> bool:
 
 
 def client_result_url(generation) -> Optional[str]:
-    """Gallery/lightbox URL only when the file is already in our MinIO.
+    """URL для галереи: всегда наш /file, если есть MinIO-ключ или CDN URL провайдера.
 
-    Moonez CDN (cdn.rendergrid.io) is never exposed to the browser — some RU
-    ISPs reset that host. Until persist finishes, return None (UI shows spinner).
+    Браузер никогда не ходит на cdn.rendergrid.io напрямую — /file отдаёт байты
+    из MinIO или скачивает CDN на сервере.
     """
     path = getattr(generation, "result_path", None) or getattr(generation, "result_url", None)
     if _is_storage_object_key(path):
+        return generation_file_url(generation.id)
+    meta = getattr(generation, "generation_metadata", None) or {}
+    provider_url = meta.get("provider_image_url")
+    if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
         return generation_file_url(generation.id)
     return None
 
