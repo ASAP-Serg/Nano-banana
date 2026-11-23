@@ -87,9 +87,9 @@ def consume_token(session, raw: str, purpose: str) -> Optional[int]:
 
 
 def consume_verify_code(session, user_id: int, code: str) -> bool:
-    """Consume an 8-digit verify code for a specific user (accept legacy 6)."""
+    """Consume an 8-digit verify code for a specific user."""
     raw = "".join(ch for ch in str(code or "") if ch.isdigit())
-    if len(raw) not in (6, 8):
+    if len(raw) != 8:
         return False
     now = datetime.utcnow()
     row = (

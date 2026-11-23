@@ -215,7 +215,7 @@ export default function AuthModals({
                     <button
                       type="submit"
                       className="nb-auth-primary"
-                      disabled={verifyBusy || ![6, 8].includes(verifyCode.length)}
+                      disabled={verifyBusy || verifyCode.length !== 8}
                     >
                       {verifyBusy ? "Проверяем…" : "Подтвердить"}
                     </button>

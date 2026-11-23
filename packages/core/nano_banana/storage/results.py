@@ -155,6 +155,7 @@ def _download_range(url: str, start: int, end: int) -> tuple[int, bytes]:
         headers=headers,
         timeout=(DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_READ_TIMEOUT),
         stream=True,
+        allow_redirects=False,
     )
     try:
         if resp.status_code not in (200, 206):
@@ -184,6 +185,7 @@ def _parallel_range_download(url: str, *, on_progress: ProgressCb = None) -> Opt
         headers={**_headers(), "Range": "bytes=0-0"},
         timeout=(DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_READ_TIMEOUT),
         stream=True,
+        allow_redirects=False,
     )
     try:
         if head.status_code not in (200, 206):
@@ -248,6 +250,7 @@ def _requests_stream_download(url: str, *, on_progress: ProgressCb = None) -> by
         headers=_headers(),
         timeout=(DOWNLOAD_CONNECT_TIMEOUT, DOWNLOAD_READ_TIMEOUT),
         stream=True,
+        allow_redirects=False,
     )
     try:
         status = int(resp.status_code)

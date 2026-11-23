@@ -152,9 +152,9 @@ async def healthz():
 
 @app.get("/readyz")
 async def readyz(request: Request):
-    # Не светим checks наружу: только loopback / docker-internal.
+    # Loopback only — never expose dependency checks on the Docker bridge.
     client = request.client.host if request.client else ""
-    if client not in ("127.0.0.1", "::1") and not client.startswith("172.") and not client.startswith("10."):
+    if client not in ("127.0.0.1", "::1"):
         return JSONResponse(status_code=404, content={"detail": "Not Found"})
     checks = {"postgres": False, "redis": False, "s3": False}
     try:

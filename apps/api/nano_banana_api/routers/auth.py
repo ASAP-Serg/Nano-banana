@@ -496,7 +496,7 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Подтвердите email: введите 6-значный код из письма (или запросите письмо снова).",
+                detail="Подтвердите email: введите код из письма (или запросите письмо снова).",
             )
 
         totp_just_ok = False
@@ -621,7 +621,8 @@ async def verify_email_code(body: VerifyEmailCodeRequest, request: Request, resp
             raise HTTPException(status_code=400, detail="Неверный код или email")
         # Inactive + already verified = disabled account. Inactive + unverified = waiting for code.
         if not user.is_active and bool(getattr(user, "email_verified", False)):
-            raise HTTPException(status_code=400, detail="Аккаунт отключён")
+            # Same wording as wrong code — no disabled-account enumeration.
+            raise HTTPException(status_code=400, detail="Неверный код или email")
         if bool(getattr(user, "email_verified", False)):
             if not user.is_active:
                 user.is_active = True
@@ -631,7 +632,7 @@ async def verify_email_code(body: VerifyEmailCodeRequest, request: Request, resp
             _set_access_cookie(response, access)
             return {"ok": True, "verified": True}
         if not consume_verify_code(session, user.id, body.code):
-            raise HTTPException(status_code=400, detail="Неверный или просроченный код")
+            raise HTTPException(status_code=400, detail="Неверный код или email")
         user.email_verified = True
         user.is_active = True
         session.commit()
