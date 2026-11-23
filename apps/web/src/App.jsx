@@ -462,6 +462,7 @@ export default function App() {
         num_inference_steps: Number.isFinite(Number(gen.num_inference_steps)) ? Number(gen.num_inference_steps) : 50,
         seed: gen.seed ?? null,
         rewrite_prompt: Boolean(gen.rewrite_requested),
+        enhance_prompt: Boolean(gen.enhance_requested),
         reference_images: Array.isArray(gen.reference_images) ? gen.reference_images : [],
       });
     } catch (err) {

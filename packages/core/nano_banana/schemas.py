@@ -298,7 +298,8 @@ class ImageGenerationRequest(BaseModel):
     seed: Optional[int] = None
     reference_images: Optional[List[str]] = None
     model_name: Optional[str] = None
-    rewrite_prompt: Optional[bool] = False
+    rewrite_prompt: Optional[bool] = False  # GPT rewrite after content-policy block
+    enhance_prompt: Optional[bool] = False  # GPT expand/improve prompt before generation
     mosaic_kind: Optional[str] = None
     mosaic_variant: Optional[str] = None  # 3_pro | 2.5_flash | 3.1_flash
 
@@ -442,10 +443,13 @@ class ImageResponse(BaseModel):
     rewritten_prompt: Optional[str] = None
     rewrite_model: Optional[str] = None
     rewrite_error: Optional[str] = None
+    rewrite_requested: Optional[bool] = None
+    enhance_requested: Optional[bool] = None
     policy_gpt_attempts: Optional[List[dict]] = None
     provider_job_id: Optional[str] = None
     provider_model: Optional[str] = None
     provider_cost_usd: Optional[float] = None
+    gpt_rewrite_cost_usd: Optional[float] = None
     estimated_cost_usd: Optional[float] = None
     provider_phase: Optional[str] = None
     status_detail: Optional[str] = None

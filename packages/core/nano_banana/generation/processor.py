@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -71,9 +70,11 @@ def rewrite_metadata_fields(metadata: Optional[dict]) -> dict:
         "rewrite_error": meta.get("rewrite_error"),
         "policy_gpt_attempts": meta.get("policy_gpt_attempts"),
         "rewrite_requested": meta.get("rewrite_requested"),
+        "enhance_requested": meta.get("enhance_requested"),
         "provider_job_id": meta.get("provider_job_id"),
         "provider_model": meta.get("provider_model"),
         "provider_cost_usd": meta.get("provider_cost_usd"),
+        "gpt_rewrite_cost_usd": meta.get("gpt_rewrite_cost_usd"),
         "provider_phase": meta.get("provider_phase"),
         "status_detail": meta.get("status_detail"),
         "persist_pending": bool(meta.get("persist_pending")),
@@ -140,19 +141,85 @@ def _build_resume_payload(generation: Generation, request_data: dict) -> Dict[st
         "model_name": request_data.get("model_name") or generation.model_name or metadata.get("model_name"),
         "reference_images": request_data.get("reference_images") or metadata.get("reference_image_urls") or [],
         "rewrite_prompt": bool(request_data.get("rewrite_prompt") or metadata.get("rewrite_requested")),
+        "enhance_prompt": bool(request_data.get("enhance_prompt") or metadata.get("enhance_requested")),
     }
 
 
-def _init_policy_rewrite_metadata(generation, session, prompt: str, rewrite_requested: bool) -> None:
-    if not rewrite_requested:
+def _init_gpt_prompt_metadata(
+    generation,
+    session,
+    prompt: str,
+    *,
+    rewrite_requested: bool,
+    enhance_requested: bool,
+) -> None:
+    if not rewrite_requested and not enhance_requested:
         return
     if not generation.generation_metadata:
         generation.generation_metadata = {}
-    generation.generation_metadata["rewrite_requested"] = True
+    if rewrite_requested:
+        generation.generation_metadata["rewrite_requested"] = True
+        generation.generation_metadata.setdefault("policy_gpt_attempts", [])
+    if enhance_requested:
+        generation.generation_metadata["enhance_requested"] = True
     generation.generation_metadata.setdefault("original_prompt", prompt)
-    generation.generation_metadata.setdefault("policy_gpt_attempts", [])
     flag_modified(generation, "generation_metadata")
     session.commit()
+
+
+def _add_gpt_rewrite_cost(generation, rewrite_result: dict) -> None:
+    raw = rewrite_result.get("cost_usd")
+    if raw is None:
+        return
+    try:
+        amount = float(raw)
+    except (TypeError, ValueError):
+        return
+    if amount < 0:
+        return
+    if not generation.generation_metadata:
+        generation.generation_metadata = {}
+    prev = float(generation.generation_metadata.get("gpt_rewrite_cost_usd") or 0)
+    generation.generation_metadata["gpt_rewrite_cost_usd"] = round(prev + amount, 8)
+
+
+def _try_upfront_gpt_enhance(generation, session, prompt: str, keys: dict) -> Optional[str]:
+    openrouter_key = keys.get("openrouter")
+    if not openrouter_key:
+        if not generation.generation_metadata:
+            generation.generation_metadata = {}
+        generation.generation_metadata["rewrite_error"] = (
+            "GPT улучшение промпта недоступно — добавьте ключ sk-or_ в настройках."
+        )
+        flag_modified(generation, "generation_metadata")
+        session.commit()
+        return None
+    if not generation.generation_metadata:
+        generation.generation_metadata = {}
+    generation.generation_metadata["status_detail"] = "GPT улучшает промпт…"
+    flag_modified(generation, "generation_metadata")
+    session.commit()
+    rewrite_result = OpenRouterService(api_key=openrouter_key).enhance_prompt(prompt)
+    if rewrite_result.get("success") and rewrite_result.get("prompt"):
+        enhanced = str(rewrite_result["prompt"]).strip()
+        generation.generation_metadata["rewritten_prompt"] = enhanced
+        generation.generation_metadata["rewrite_model"] = rewrite_result.get("model")
+        _add_gpt_rewrite_cost(generation, rewrite_result)
+        generation.generation_metadata.pop("rewrite_error", None)
+        generation.generation_metadata.pop("status_detail", None)
+        generation.prompt = enhanced
+        flag_modified(generation, "generation_metadata")
+        session.commit()
+        return enhanced
+    err = humanize_api_error(
+        rewrite_result.get("error") or "GPT не смог улучшить промпт",
+        provider="openrouter",
+    )
+    generation.generation_metadata["rewrite_error"] = err
+    generation.generation_metadata.pop("status_detail", None)
+    flag_modified(generation, "generation_metadata")
+    session.commit()
+    return None
 
 
 def _try_policy_gpt_rewrite(generation, session, generation_id: int, prompt: str, block_reason: str, keys: dict) -> Optional[str]:
@@ -170,12 +237,15 @@ def _try_policy_gpt_rewrite(generation, session, generation_id: int, prompt: str
                 "block_reason": (block_reason or "")[:500],
                 "rewritten_prompt": rewrite_result.get("prompt"),
                 "model": rewrite_result.get("model"),
+                "cost_usd": rewrite_result.get("cost_usd"),
             }
         )
         generation.generation_metadata["policy_gpt_attempts"] = attempts
         generation.generation_metadata["rewritten_prompt"] = rewrite_result.get("prompt")
         generation.generation_metadata["rewrite_model"] = rewrite_result.get("model")
+        _add_gpt_rewrite_cost(generation, rewrite_result)
         generation.generation_metadata.pop("rewrite_error", None)
+        generation.prompt = rewrite_result["prompt"]
         flag_modified(generation, "generation_metadata")
         session.commit()
         return rewrite_result["prompt"]
@@ -186,7 +256,6 @@ def _try_policy_gpt_rewrite(generation, session, generation_id: int, prompt: str
     flag_modified(generation, "generation_metadata")
     session.commit()
     return None
-
 
 def _fail(generation, session, message: str) -> None:
     generation.status = "failed"
@@ -266,7 +335,14 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
 
             prompt_for_generation = request_data.get("prompt") or ""
             rewrite_requested = bool(request_data.get("rewrite_prompt"))
-            _init_policy_rewrite_metadata(generation, session, prompt_for_generation, rewrite_requested)
+            enhance_requested = bool(request_data.get("enhance_prompt"))
+            _init_gpt_prompt_metadata(
+                generation,
+                session,
+                prompt_for_generation,
+                rewrite_requested=rewrite_requested,
+                enhance_requested=enhance_requested,
+            )
             max_policy_gpt = settings.MAX_POLICY_GPT_RETRIES if rewrite_requested else 0
             policy_gpt_used = 0
             result = None
@@ -286,6 +362,23 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 logger.exception("[GENERATION] reference materialize failed gen=%s", generation_id)
                 _fail(generation, session, "Не удалось прочитать референс.")
                 return
+
+            if enhance_requested:
+                enhanced = _try_upfront_gpt_enhance(
+                    generation, session, prompt_for_generation, keys
+                )
+                if enhanced and enhanced.strip() and enhanced.strip() != prompt_for_generation.strip():
+                    prompt_for_generation = enhanced
+                    logger.info(
+                        "[GENERATION] %s prompt enhanced by GPT (%s chars)",
+                        generation_id,
+                        len(enhanced),
+                    )
+                else:
+                    logger.warning(
+                        "[GENERATION] %s enhance skipped/failed — using original prompt",
+                        generation_id,
+                    )
 
             def _on_provider_status(info: Dict[str, Any]) -> None:
                 phase = str(info.get("phase") or "").strip().lower()
@@ -373,91 +466,6 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                     generation.generation_metadata.pop("paused_request_data", None)
                 if not generation.generation_metadata:
                     generation.generation_metadata = {}
-
-                image_data = result.get("image_data")
-                image_url = result.get("image_url")
-                has_bytes = isinstance(image_data, (bytes, bytearray)) and len(image_data) >= 512
-                provider_url = image_url.strip() if isinstance(image_url, str) else ""
-
-                # RU VPS → Cloudflare CDN очень медленный. Сразу помечаем completed с CDN URL,
-                # браузер получит 302 на CDN (быстро с домашнего ISP), MinIO докачаем следом.
-                if provider_url and not has_bytes:
-                    try:
-                        from nano_banana.security import assert_safe_outbound_image_url
-
-                        assert_safe_outbound_image_url(provider_url, settings)
-                    except ValueError:
-                        _fail(generation, session, "Провайдер вернул небезопасный URL изображения.")
-                        return
-                    generation.generation_metadata["provider_image_url"] = provider_url
-                    generation.generation_metadata["persist_pending"] = True
-                    generation.generation_metadata["status_detail"] = "Сохраняем на сервер…"
-                    flag_modified(generation, "generation_metadata")
-                    # completed для очереди, но gallery ждёт MinIO (без CDN в браузере).
-                    generation.status = "completed"
-                    generation.completed_at = datetime.utcnow()
-                    session.commit()
-                    logger.info(
-                        "[GENERATION] %s Moonez done in %.1fs — persisting to MinIO (no browser CDN)",
-                        generation_id,
-                        (generation.completed_at - started_at).total_seconds(),
-                    )
-
-                    # Persist in a daemon thread — never block the worker. RU VPS→CDN
-                    # downloads often hang; ThreadPoolExecutor.shutdown waited on them
-                    # even after timeout and starved the next Moonez jobs.
-                    result_snapshot = dict(result) if isinstance(result, dict) else result
-                    gen_id_snap = int(generation_id)
-
-                    def _persist_in_background() -> None:
-                        try:
-                            upload_result = persist_generation_result(
-                                get_storage(),
-                                result_snapshot,
-                                on_progress=None,
-                            )
-                        except Exception:
-                            logger.exception(
-                                "[GENERATION] MinIO persist failed gen=%s (CDN fallback active)",
-                                gen_id_snap,
-                            )
-                            return
-                        if not upload_result:
-                            logger.warning(
-                                "[GENERATION] %s MinIO persist empty — CDN fallback remains",
-                                gen_id_snap,
-                            )
-                            return
-                        try:
-                            with db_service.get_session() as bg_session:
-                                row = (
-                                    bg_session.query(Generation)
-                                    .filter(Generation.id == gen_id_snap)
-                                    .first()
-                                )
-                                if not row:
-                                    return
-                                row.result_url = upload_result["path"]
-                                row.result_path = upload_result["path"]
-                                meta = dict(row.generation_metadata or {})
-                                meta["persist_pending"] = False
-                                meta.pop("status_detail", None)
-                                row.generation_metadata = meta
-                                flag_modified(row, "generation_metadata")
-                                bg_session.commit()
-                            logger.info("[GENERATION] %s persisted to MinIO (bg)", gen_id_snap)
-                        except Exception:
-                            logger.exception(
-                                "[GENERATION] MinIO persist DB update failed gen=%s",
-                                gen_id_snap,
-                            )
-
-                    threading.Thread(
-                        target=_persist_in_background,
-                        name=f"persist-{gen_id_snap}",
-                        daemon=True,
-                    ).start()
-                    return
 
                 try:
                     def _on_download_progress(done: int, total: int | None) -> None:

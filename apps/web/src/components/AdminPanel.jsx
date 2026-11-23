@@ -524,11 +524,17 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
                         #{g.id} · {g.username} · {g.status} · {g.model_name}
                       </div>
                       <div className="admin-gen-meta text-muted">
-                        {g.provider_cost_usd != null
-                          ? `${formatUsd(g.provider_cost_usd)} Moonez`
-                          : g.status !== "failed" && g.estimated_cost_usd != null
-                            ? `~${formatUsd(g.estimated_cost_usd)} оценка`
-                            : ""}
+                        {(() => {
+                          const gpt = Number(g.gpt_rewrite_cost_usd) || 0;
+                          if (g.provider_cost_usd != null) {
+                            const total = Number(g.provider_cost_usd) + gpt;
+                            return `${formatUsd(total)}${gpt > 0 ? " (модель+GPT)" : " Moonez"}`;
+                          }
+                          if (g.status !== "failed" && g.estimated_cost_usd != null) {
+                            return `~${formatUsd(Number(g.estimated_cost_usd) + gpt)} оценка`;
+                          }
+                          return gpt > 0 ? formatUsd(gpt) : "";
+                        })()}
                         {g.provider_job_id ? (
                           <>
                             {" · "}

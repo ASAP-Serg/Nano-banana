@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from nano_banana.config import settings
+from nano_banana.generation.cost import extract_openrouter_chat_cost_usd
 from nano_banana.providers.models import get_model_entry, openrouter_slug
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,14 @@ PROMPT_REWRITE_AFTER_BLOCK_SYSTEM = (
     "Перепиши промпт так, чтобы сохранить визуальный замысел (сцена, действие, настроение, стиль), "
     "но без имён реальных людей, брендов, персонажей Marvel/DC/Disney и NSFW. "
     "Используй только обобщённые описания. Верни ТОЛЬКО новый промпт на том же языке."
+)
+
+PROMPT_ENHANCE_SYSTEM = (
+    "Ты помощник для промптов генерации изображений. "
+    "Пользователь дал короткий или ленивый черновик — разверни его в детальный, выразительный "
+    "image prompt: сцена, свет, композиция, стиль, материалы, атмосфера. "
+    "Сохрани исходный замысел и язык. Не добавляй NSFW, имена реальных знаменитостей, "
+    "бренды и copyrighted characters. Верни ТОЛЬКО готовый промпт, без пояснений."
 )
 
 
@@ -202,7 +211,11 @@ class OpenRouterService:
             if not rewritten:
                 return {"success": False, "error": "OpenRouter вернул пустой промпт", "model": model}
 
-            return {"success": True, "prompt": rewritten, "model": model}
+            cost = extract_openrouter_chat_cost_usd(body if isinstance(body, dict) else None, model)
+            out = {"success": True, "prompt": rewritten, "model": model}
+            if cost is not None:
+                out["cost_usd"] = cost
+            return out
         except requests.RequestException as exc:
             return {"success": False, "error": f"OpenRouter: ошибка сети — {exc}", "model": model}
 
@@ -234,27 +247,35 @@ class OpenRouterService:
 
         return {"success": False, "error": last_error}
 
-    def rewrite_prompt(self, prompt: str) -> Dict[str, Any]:
-        """Переформулирует промпт через текстовую модель OpenRouter (legacy/upfront)."""
+    def enhance_prompt(self, prompt: str) -> Dict[str, Any]:
+        """Разворачивает короткий/ленивый промпт до генерации."""
         text = (prompt or "").strip()
         if not text:
             return {"success": False, "error": "Пустой промпт"}
 
-        user_message = f"Rewrite this image prompt:\n\n{text}"
-        last_error = "Не удалось переписать промпт"
+        user_message = (
+            f"Черновик промпта пользователя:\n{text}\n\n"
+            "Сделай из него полноценный image prompt."
+        )
+        last_error = "Не удалось улучшить промпт"
         for model in self._rewrite_model_ids():
-            result = self._chat_rewrite(PROMPT_REWRITE_AFTER_BLOCK_SYSTEM, user_message, model)
+            result = self._chat_rewrite(PROMPT_ENHANCE_SYSTEM, user_message, model)
             if result.get("success") and result.get("prompt"):
                 logger.info(
-                    "[OPENROUTER] rewrite model=%s | original=%s | rewritten=%s",
+                    "[OPENROUTER] enhance model=%s | original=%s | enhanced=%s",
                     model,
                     text[:200],
                     result["prompt"][:200],
                 )
                 return {**result, "original": text}
             last_error = result.get("error") or last_error
+            logger.warning("[OPENROUTER] enhance failed model=%s: %s", model, last_error)
 
         return {"success": False, "error": last_error}
+
+    def rewrite_prompt(self, prompt: str) -> Dict[str, Any]:
+        """Alias: upfront enhance (совместимость)."""
+        return self.enhance_prompt(prompt)
 
     @staticmethod
     def _extract_error(response: requests.Response) -> str:

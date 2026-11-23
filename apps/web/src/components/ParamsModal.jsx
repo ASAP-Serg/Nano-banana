@@ -44,8 +44,8 @@ export default function ParamsModal({ item, onClose }) {
             </button>
           </p>
         ) : null}
-        <p>
-          <strong>Стоимость:</strong>{" "}
+        <p className="mb-1">
+          <strong>Стоимость модели:</strong>{" "}
           {item.provider_cost_usd != null
             ? `${formatUsd(item.provider_cost_usd)} списал Moonez`
             : item.status === "failed"
@@ -54,6 +54,30 @@ export default function ParamsModal({ item, onClose }) {
                 ? `~${formatUsd(item.estimated_cost_usd)} оценка, пока Moonez не отдал price`
                 : "—"}
         </p>
+        {item.gpt_rewrite_cost_usd != null ? (
+          <p className="mb-1">
+            <strong>Стоимость GPT{item.rewrite_model ? ` · ${item.rewrite_model}` : ""}:</strong>{" "}
+            {formatUsd(item.gpt_rewrite_cost_usd)}
+          </p>
+        ) : null}
+        {(() => {
+          const model =
+            item.provider_cost_usd != null
+              ? Number(item.provider_cost_usd)
+              : item.status !== "failed" && item.estimated_cost_usd != null
+                ? Number(item.estimated_cost_usd)
+                : 0;
+          const gpt = Number(item.gpt_rewrite_cost_usd) || 0;
+          if (!Number.isFinite(model) && gpt <= 0) return null;
+          const total = (Number.isFinite(model) ? model : 0) + gpt;
+          const approx = item.provider_cost_usd == null && item.status !== "failed";
+          return (
+            <p>
+              <strong>Итого:</strong> {approx ? "~" : ""}
+              {formatUsd(total)}
+            </p>
+          );
+        })()}
         <p>
           <strong>Разрешение / кадр:</strong> {item.resolution || "—"} · {item.aspect_ratio || "—"}
         </p>

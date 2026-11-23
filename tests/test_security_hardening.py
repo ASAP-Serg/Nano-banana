@@ -421,21 +421,15 @@ class TestResidualRemoteSurface(unittest.TestCase):
                 "persist_pending": True,
             },
         )
-        # Pending persist: browser gets CDN directly (VPN / foreign ISP); RU VPS can't fill MinIO.
-        self.assertEqual(
-            client_result_url(pending),
-            "https://cdn.rendergrid.io/images/x.jpg",
-        )
+        # MinIO-only: CDN URLs are never exposed to the browser.
+        self.assertIsNone(client_result_url(pending))
         legacy_cdn = SimpleNamespace(
             id=12,
             result_path=None,
             result_url="https://cdn.rendergrid.io/images/legacy.jpg",
             generation_metadata={},
         )
-        self.assertEqual(
-            client_result_url(legacy_cdn),
-            "https://cdn.rendergrid.io/images/legacy.jpg",
-        )
+        self.assertIsNone(client_result_url(legacy_cdn))
         empty = SimpleNamespace(id=11, result_path=None, result_url=None, generation_metadata={})
         self.assertIsNone(client_result_url(empty))
 
@@ -892,9 +886,10 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         # Inside /assets/ block, CSP must be re-declared (nginx inheritance quirk).
         assets = compose.split("location /assets/")[1].split("location /")[0]
         self.assertIn("Content-Security-Policy", assets)
-        self.assertIn("cdn.rendergrid.io", assets)
         self.assertIn("X-Frame-Options", assets)
-        self.assertIn("cdn.rendergrid.io", compose)
+        self.assertNotIn("cdn.rendergrid.io", assets)
+        self.assertNotIn("cdn.rendergrid.io", compose)
+        self.assertNotIn("rg-cdn", compose)
 
 
 class TestOwaspSecurityContracts(unittest.TestCase):

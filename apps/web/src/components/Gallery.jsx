@@ -3,6 +3,7 @@ import {
   formatDurationSeconds,
   formatUsd,
   isSafeMediaUrl,
+  totalDisplayCost,
   toast,
 } from "../toast.js";
 import { IconButton, IconDownload, IconInfo, IconRefresh, IconToForm, IconTrash } from "../icons.jsx";
@@ -108,13 +109,24 @@ export default function Gallery({
                       <span className="gallery-meta__model" title={item.model_name || ""}>
                         {shortModelName(item.model_name)}
                       </span>
-                      {item.provider_cost_usd != null ? (
-                        <span className="gallery-meta__price">{formatUsd(item.provider_cost_usd)}</span>
-                      ) : item.status !== "failed" && item.estimated_cost_usd != null ? (
-                        <span className="gallery-meta__price gallery-meta__price--est">
-                          ~{formatUsd(item.estimated_cost_usd)}
-                        </span>
-                      ) : null}
+                      {(() => {
+                        const total = totalDisplayCost(item);
+                        if (!total) return null;
+                        const label = formatUsd(total.amount);
+                        if (!label) return null;
+                        return (
+                          <span
+                            className={`gallery-meta__price${total.estimated ? " gallery-meta__price--est" : ""}`}
+                            title={
+                              item.gpt_rewrite_cost_usd != null
+                                ? `модель + GPT rewrite (${formatUsd(item.gpt_rewrite_cost_usd)})`
+                                : undefined
+                            }
+                          >
+                            {total.estimated ? `~${label}` : label}
+                          </span>
+                        );
+                      })()}
                       {item.site_ready_seconds != null ? (
                         <span
                           className="gallery-meta__time"

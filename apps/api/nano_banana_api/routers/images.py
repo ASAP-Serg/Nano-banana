@@ -5,7 +5,7 @@ import logging
 from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm.attributes import flag_modified
 
 from nano_banana.auth import auth_service
@@ -79,6 +79,7 @@ def _queue_payload(body: ImageGenerationRequest, reference_image_urls: List[str]
         "seed": body.seed,
         "model_name": body.model_name or DEFAULT_MODEL_ID,
         "rewrite_prompt": bool(body.rewrite_prompt),
+        "enhance_prompt": bool(body.enhance_prompt),
         "reference_images": reference_image_urls,
     }
 
@@ -166,6 +167,7 @@ async def generate_image(
                     "resolution": "1K",
                     "aspect_ratio": "9:16",
                     "rewrite_prompt": False,
+                    "enhance_prompt": False,
                     "reference_images": refs,
                 }
             )
@@ -478,72 +480,14 @@ async def get_generation_file(
     with db_service.get_session() as session:
         generation = _load_accessible_generation(session, generation_id, user)
         source = getattr(generation, "result_path", None) or generation.result_url
-        meta = generation.generation_metadata or {}
-        provider_url = meta.get("provider_image_url") if isinstance(meta, dict) else None
-        # Old rows may store the CDN URL in result_url without provider_image_url.
-        if not provider_url and isinstance(source, str) and source.startswith(("https://", "http://")):
-            provider_url = source
-        persist_pending = bool(isinstance(meta, dict) and meta.get("persist_pending"))
-        if not source and not provider_url:
+        if not source or (
+            isinstance(source, str) and source.startswith(("https://", "http://"))
+        ):
             raise HTTPException(status_code=404, detail="Генерация не найдена")
 
-    # MinIO first (fast, same for everyone). If missing — hand CDN to the
-    # browser immediately. NEVER block the request on VPS→CDN download:
-    # that hung the whole gallery (all /file Pending).
     got = _minio_bytes(source)
     if got:
         return _media_bytes_response(got[0], got[1], download=download)
-
-    if isinstance(provider_url, str) and provider_url.startswith(("https://", "http://")):
-        from nano_banana.security import assert_safe_outbound_image_url
-
-        try:
-            assert_safe_outbound_image_url(provider_url, settings)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Генерация не найдена") from exc
-
-        # Kick MinIO persist in background (daemon) without blocking response.
-        if persist_pending:
-            import threading
-
-            from nano_banana.storage.results import persist_generation_result
-
-            snap_url = provider_url
-            gen_id = generation_id
-
-            def _bg_persist() -> None:
-                try:
-                    upload = persist_generation_result(
-                        _storage(),
-                        {"image_url": snap_url},
-                        on_progress=None,
-                    )
-                    if not upload:
-                        return
-                    with db_service.get_session() as bg:
-                        row = bg.query(Generation).filter(Generation.id == gen_id).first()
-                        if not row:
-                            return
-                        row.result_url = upload["path"]
-                        row.result_path = upload["path"]
-                        meta2 = dict(row.generation_metadata or {})
-                        meta2["persist_pending"] = False
-                        meta2.pop("status_detail", None)
-                        row.generation_metadata = meta2
-                        flag_modified(row, "generation_metadata")
-                        bg.commit()
-                    logger.info("[GENERATION] %s MinIO persist ok (lazy)", gen_id)
-                except Exception:
-                    logger.exception("Lazy MinIO persist failed gen=%s", gen_id)
-
-            threading.Thread(target=_bg_persist, name=f"persist-lazy-{gen_id}", daemon=True).start()
-
-        if download:
-            return JSONResponse(
-                {"url": provider_url},
-                headers={"Cache-Control": "private, no-store"},
-            )
-        return RedirectResponse(url=provider_url, status_code=302)
 
     raise HTTPException(status_code=404, detail="Генерация не найдена")
 

@@ -94,6 +94,7 @@ def reclaim_unlocked_jobs() -> int:
                 "model_name": gen.model_name or metadata.get("model_name"),
                 "reference_images": metadata.get("reference_image_urls") or [],
                 "rewrite_prompt": bool(metadata.get("rewrite_requested")),
+                "enhance_prompt": bool(metadata.get("enhance_requested")),
             }
             if gen.status == "running":
                 gen.status = "pending"

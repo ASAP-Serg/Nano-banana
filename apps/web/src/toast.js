@@ -26,6 +26,24 @@ export function formatUsd(n) {
   return `$${value.toFixed(5)}`;
 }
 
+/** Card total: model fact/estimate + GPT rewrite. */
+export function totalDisplayCost(item) {
+  if (!item) return null;
+  const gpt = Number(item.gpt_rewrite_cost_usd);
+  const gptPart = Number.isFinite(gpt) && gpt > 0 ? gpt : 0;
+  const fact = Number(item.provider_cost_usd);
+  if (Number.isFinite(fact)) {
+    return { amount: fact + gptPart, estimated: false };
+  }
+  if (item.status === "failed" && gptPart <= 0) return null;
+  const est = Number(item.estimated_cost_usd);
+  if (Number.isFinite(est)) {
+    return { amount: est + gptPart, estimated: true };
+  }
+  if (gptPart > 0) return { amount: gptPart, estimated: false };
+  return null;
+}
+
 export function shortJobId(id) {
   const value = String(id || "");
   if (value.length <= 20) return value;
@@ -45,47 +63,17 @@ export function toast(message, type = "success") {
   }, 3500);
 }
 
-const CDN_HOST_SUFFIXES = [
-  "rendergrid.io",
-  "moonez.ai",
-  "replicate.delivery",
-  "replicate.com",
-  "googleusercontent.com",
-  "storage.googleapis.com",
-];
-
-function isAllowedCdnHost(hostname) {
-  const host = String(hostname || "")
-    .toLowerCase()
-    .replace(/\.$/, "");
-  if (!host) return false;
-  return CDN_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
-}
-
 export function isSafeMediaUrl(url) {
   if (!url || typeof url !== "string") return false;
   const value = url.trim();
   if (!value || value.includes("..")) return false;
   try {
     const parsed = new URL(value, window.location.origin);
-    if (parsed.origin === window.location.origin) {
-      return /^\/api\/v1\/images\/\d+\/(file|reference\/\d+)\/?$/.test(parsed.pathname);
-    }
-    // Moonez CDN while MinIO persist is pending — VPN / foreign ISP path.
-    return parsed.protocol === "https:" && isAllowedCdnHost(parsed.hostname);
+    if (parsed.origin !== window.location.origin) return false;
+    return /^\/api\/v1\/images\/\d+\/(file|reference\/\d+)\/?$/.test(parsed.pathname);
   } catch {
     return false;
   }
-}
-
-function openCdnDownload(cdnUrl) {
-  const a = document.createElement("a");
-  a.href = cdnUrl;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
 }
 
 function downloadFileUrl(imageUrl) {
@@ -128,21 +116,9 @@ export async function downloadImage(imageUrl, prompt) {
     return;
   }
   try {
-    // Direct CDN URL (persist pending): don't fetch via CORS — just open.
-    try {
-      const abs = new URL(imageUrl, window.location.origin);
-      if (abs.origin !== window.location.origin && isAllowedCdnHost(abs.hostname)) {
-        openCdnDownload(abs.href);
-        toast("Открыл оригинал — сохрани через браузер");
-        return;
-      }
-    } catch {
-      /* fall through to /file */
-    }
-
     const response = await fetch(downloadFileUrl(imageUrl), {
       credentials: "include",
-      headers: { Accept: "application/json,image/*,*/*" },
+      headers: { Accept: "image/*,*/*" },
     });
     if (!response.ok) {
       let detail = `HTTP ${response.status}`;
@@ -154,28 +130,7 @@ export async function downloadImage(imageUrl, prompt) {
       }
       throw new Error(detail);
     }
-    const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    let blob;
-    if (contentType.includes("application/json")) {
-      const payload = await response.json();
-      const cdnUrl = typeof payload?.url === "string" ? payload.url : "";
-      if (!/^https:\/\//i.test(cdnUrl)) throw new Error("Нет ссылки на файл");
-      try {
-        const cdnRes = await fetch(cdnUrl, {
-          credentials: "omit",
-          mode: "cors",
-          referrerPolicy: "no-referrer",
-        });
-        if (!cdnRes.ok) throw new Error(`CDN HTTP ${cdnRes.status}`);
-        blob = await cdnRes.blob();
-      } catch {
-        openCdnDownload(cdnUrl);
-        toast("Открыл оригинал — сохрани через браузер");
-        return;
-      }
-    } else {
-      blob = await response.blob();
-    }
+    const blob = await response.blob();
     triggerBlobDownload(blob, prompt);
     toast("Изображение скачано");
   } catch (err) {

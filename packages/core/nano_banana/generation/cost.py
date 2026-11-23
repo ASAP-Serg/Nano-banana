@@ -34,6 +34,60 @@ RESOLUTION_MULTIPLIER = {"1K": 1.0, "2K": 1.6, "4K": 2.5}
 REF_FEE_USD = 0.002
 MAX_REFS = 14
 
+# OpenRouter chat (prompt rewrite/enhance). USD per 1M tokens.
+# Fallback estimate when response has no native `usage.cost`.
+OPENROUTER_CHAT_USD_PER_1M = {
+    "openai/gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    "openai/gpt-4o": {"input": 2.50, "output": 10.0},
+    "openai/gpt-4.1-mini": {"input": 0.40, "output": 1.60},
+    "google/gemini-2.0-flash-001": {"input": 0.10, "output": 0.40},
+    "google/gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+}
+
+
+def estimate_openrouter_chat_cost_usd(
+    *,
+    model: Optional[str] = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+) -> float:
+    rates = OPENROUTER_CHAT_USD_PER_1M.get(
+        (model or "").strip(),
+        OPENROUTER_CHAT_USD_PER_1M["openai/gpt-4o-mini"],
+    )
+    inp = max(int(prompt_tokens or 0), 0)
+    out = max(int(completion_tokens or 0), 0)
+    return round((inp * rates["input"] + out * rates["output"]) / 1_000_000.0, 8)
+
+
+def extract_openrouter_chat_cost_usd(body: Optional[dict], model: Optional[str] = None) -> Optional[float]:
+    """Prefer OpenRouter native usage.cost; else estimate from tokens."""
+    if not isinstance(body, dict):
+        return None
+    usage = body.get("usage")
+    if isinstance(usage, dict):
+        for key in ("cost", "total_cost", "cost_usd"):
+            raw = usage.get(key)
+            if raw is not None:
+                try:
+                    amount = float(raw)
+                    if amount >= 0:
+                        return round(amount, 8)
+                except (TypeError, ValueError):
+                    pass
+        try:
+            prompt_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+        except (TypeError, ValueError):
+            prompt_tokens = completion_tokens = 0
+        if prompt_tokens or completion_tokens:
+            return estimate_openrouter_chat_cost_usd(
+                model=model or body.get("model"),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+    return None
+
 
 def _moonez_bills_flat_job(model: str) -> bool:
     if model.endswith("-r8"):

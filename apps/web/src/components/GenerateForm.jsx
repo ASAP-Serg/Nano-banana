@@ -78,6 +78,7 @@ const GenerateForm = forwardRef(function GenerateForm({
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("");
   const [rewrite, setRewrite] = useState(() => localStorage.getItem("nb_rewrite") === "1");
+  const [enhance, setEnhance] = useState(() => localStorage.getItem("nb_enhance") === "1");
   const [resolution, setResolution] = useState("1K");
   const [aspect, setAspect] = useState("1:1");
   const [aspectOpen, setAspectOpen] = useState(false);
@@ -318,6 +319,7 @@ const GenerateForm = forwardRef(function GenerateForm({
         num_inference_steps: Number(steps),
         seed: seed === "" ? null : Number(seed),
         rewrite_prompt: false,
+        enhance_prompt: false,
         reference_images: shots.map((item) => item.dataUrl),
       });
       return;
@@ -334,6 +336,7 @@ const GenerateForm = forwardRef(function GenerateForm({
       num_inference_steps: Number(steps),
       seed: seed === "" ? null : Number(seed),
       rewrite_prompt: rewrite,
+      enhance_prompt: enhance,
       // Refs stay in UI across tabs; only this tab's Generate sends them.
       reference_images: useRefs ? refs.map((r) => r.dataUrl) : [],
     });
@@ -593,6 +596,22 @@ const GenerateForm = forwardRef(function GenerateForm({
           )}
           {mode !== "mosaic" && (
           <>
+          <div className="form-check mb-2">
+            <input
+              className="form-check-input"
+              type="checkbox"
+              checked={enhance}
+              onChange={(e) => {
+                setEnhance(e.target.checked);
+                localStorage.setItem("nb_enhance", e.target.checked ? "1" : "0");
+              }}
+              id="enhance"
+            />
+            <label className="form-label form-check-label" htmlFor="enhance">
+              GPT: автоулучшение промпта
+            </label>
+            <div className="form-text">Сделает описание понятнее для генеративной модели (детали, свет, стиль).</div>
+          </div>
           <div className="form-check mb-3">
             <input
               className="form-check-input"
@@ -605,8 +624,9 @@ const GenerateForm = forwardRef(function GenerateForm({
               id="rewrite"
             />
             <label className="form-label form-check-label" htmlFor="rewrite">
-              GPT: авто-переписать при блокировке фильтра
+              GPT: автоулучшение при блокировках
             </label>
+            <div className="form-text">Если фильтр отклонит запрос — смягчит жёсткие места и повторит.</div>
           </div>
           <div className="mb-3">
             <label className="form-label">Негативный промпт</label>

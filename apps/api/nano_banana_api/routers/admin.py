@@ -139,6 +139,7 @@ def _generation_full_payload(gen: Generation, username: Optional[str] = None) ->
         "provider_job_id": metadata.get("provider_job_id"),
         "provider_model": metadata.get("provider_model"),
         "provider_cost_usd": metadata.get("provider_cost_usd"),
+        "gpt_rewrite_cost_usd": metadata.get("gpt_rewrite_cost_usd"),
         "estimated_cost_usd": _estimate_cost_usd(gen),
     }
 
@@ -736,11 +737,14 @@ async def admin_overview(
             amount = 0.0
             source = "estimated"
             metadata = g.generation_metadata or {}
+            gpt_cost = float(metadata.get("gpt_rewrite_cost_usd") or 0)
             if metadata.get("provider_cost_usd") is not None:
-                amount = float(metadata.get("provider_cost_usd") or 0)
+                amount = float(metadata.get("provider_cost_usd") or 0) + gpt_cost
                 source = "fact"
             elif g.status in ("completed", "failed"):
-                amount = _estimate_cost_usd(g)
+                amount = _estimate_cost_usd(g) + gpt_cost
+            else:
+                amount = gpt_cost
             if g.user_id not in spend_by_user:
                 spend_by_user[g.user_id] = {"amount": 0.0, "fact": 0, "estimated": 0}
             spend_by_user[g.user_id]["amount"] += amount
