@@ -569,10 +569,11 @@ class TestMediumHardening(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         compose = (root / "deploy" / "nginx" / "web.compose.conf").read_text(encoding="utf-8")
         k8s = (root / "deploy" / "nginx" / "web.conf").read_text(encoding="utf-8")
-        self.assertIn("map $http_x_real_ip $nb_client_ip", compose)
+        self.assertIn("set_real_ip_from", compose)
+        self.assertIn("real_ip_header X-Real-IP", compose)
+        self.assertNotIn("map $http_x_real_ip $nb_client_ip", compose)
         api_block = compose.split("location /api/")[1].split("location ")[0]
-        self.assertIn("X-Real-IP $nb_client_ip", api_block)
-        self.assertNotIn("X-Real-IP $remote_addr", api_block)
+        self.assertIn("X-Real-IP $remote_addr", api_block)
         self.assertIn("Content-Security-Policy", k8s)
 
     def test_providers_use_capped_download(self):
