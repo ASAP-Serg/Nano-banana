@@ -41,10 +41,13 @@ export default function App() {
   const [keys, setKeys] = useState({});
   const [gallery, setGallery] = useState([]);
   const [galleryMeta, setGalleryMeta] = useState(null);
+  const [galleryBlocked, setGalleryBlocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lightbox, setLightbox] = useState(null);
   const [infoItem, setInfoItem] = useState(null);
   const generateRef = useRef(null);
+  const galleryRef = useRef([]);
+  galleryRef.current = gallery;
 
   useEffect(() => {
     clearLegacyToken();
@@ -207,20 +210,30 @@ export default function App() {
   const loadGallery = useCallback(async () => {
     if (!user) {
       setGallery([]);
+      setGalleryBlocked(false);
       return;
     }
+    if (galleryBlocked) return;
     try {
       const data = await api.list(50, 0);
       setGallery(data.generations || []);
       setGalleryMeta(data.meta || null);
+      setGalleryBlocked(false);
     } catch (err) {
       if (err.status === 401) {
         handleAuthLost();
         return;
       }
+      if (err.status === 403) {
+        // Waiting for email/admin approve — stop polling, don't toast-spam.
+        setGalleryBlocked(true);
+        setGallery([]);
+        setGalleryMeta(null);
+        return;
+      }
       toast(err.message, "error");
     }
-  }, [user, handleAuthLost]);
+  }, [user, galleryBlocked, handleAuthLost]);
 
   const loadModels = useCallback(async () => {
     if (!user) return;
@@ -228,9 +241,14 @@ export default function App() {
       const data = await api.models();
       setModels(data.models || {});
       setDefaultModel(data.default_model || "nano-banana-pro");
+    } catch (err) {
+      if (err.status !== 403) toast(err.message, "error");
+    }
+    try {
       setKeys(await api.getKeys());
     } catch (err) {
-      toast(err.message, "error");
+      if (err.status === 403) setKeys({});
+      else if (err.status !== 401) toast(err.message, "error");
     }
   }, [user]);
 
@@ -255,13 +273,31 @@ export default function App() {
     return () => clearInterval(t);
   }, [authChecked, user, loadStatus]);
 
+  // After admin approve / email verify, /me updates flags — resume gallery poll.
   useEffect(() => {
-    if (!user) return;
+    setGalleryBlocked(false);
+  }, [user?.id, user?.is_approved, user?.email_verified]);
+
+  useEffect(() => {
+    if (!user || galleryBlocked) return undefined;
     loadModels();
-    loadGallery();
-    const t = setInterval(loadGallery, 4000);
-    return () => clearInterval(t);
-  }, [user, loadModels, loadGallery]);
+    let cancelled = false;
+    let timer = null;
+    const tick = async () => {
+      await loadGallery();
+      if (cancelled || galleryBlocked) return;
+      const active = (galleryRef.current || []).some((g) =>
+        ["pending", "running", "paused"].includes(g.status)
+      );
+      // Active jobs: 4s. Idle gallery: 30s. Blocked (403): effect tears down.
+      timer = setTimeout(tick, active ? 4000 : 30000);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [user, galleryBlocked, loadModels, loadGallery]);
 
   async function onLogin(form, rememberDevice) {
     const emailOrUser = String(form.get("username") || "").trim();

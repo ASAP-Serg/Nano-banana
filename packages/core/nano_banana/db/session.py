@@ -75,6 +75,14 @@ class DBService:
             session.commit()
         except Exception as e:
             session.rollback()
+            # HTTP 4xx from route handlers is not a DB failure — don't spam ERROR logs.
+            try:
+                from starlette.exceptions import HTTPException as StarletteHTTPException
+
+                if isinstance(e, StarletteHTTPException):
+                    raise
+            except ImportError:
+                pass
             logger.error(f"Database operation failed: {str(e)}")
             raise
         finally:
