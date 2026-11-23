@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     SECURITY_REQUIRE_ADMIN_APPROVAL: bool = True
     # Auto-deactivate: email not verified + no login for N days (admins skipped).
     SECURITY_UNVERIFIED_INACTIVE_DAYS: int = 60
+    # Delete password signups that never confirmed email (0 = disable purge).
+    SECURITY_UNVERIFIED_PURGE_HOURS: int = 1
     GOOGLE_OAUTH_CLIENT_ID: str = ""
     GOOGLE_OAUTH_CLIENT_SECRET: str = ""
     GOOGLE_OAUTH_REDIRECT_URI: str = ""

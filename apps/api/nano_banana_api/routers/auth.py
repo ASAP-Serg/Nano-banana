@@ -419,13 +419,15 @@ async def register(
         session.refresh(new_user)
 
         if not verified:
-            code = issue_verify_code(session, new_user.id, hours=24)
+            verify_hours = max(1, int(getattr(settings, "SECURITY_UNVERIFIED_PURGE_HOURS", 1) or 1))
+            code = issue_verify_code(session, new_user.id, hours=verify_hours)
             session.commit()
             send_verify_email(
                 email_norm,
                 _verify_code_link(email_norm, code),
                 new_user.username,
                 code=code,
+                hours=verify_hours,
             )
             msg = (
                 "Мы отправили код на email. Пока код не введён, аккаунт не активен "
@@ -654,13 +656,15 @@ async def resend_verification(body: ResendVerifyRequest, request: Request):
         user = session.query(User).filter(User.email == email).first()
         # Allow resend for inactive stubs waiting on first email confirm.
         if user and user.hashed_password and not user.email_verified:
-            code = issue_verify_code(session, user.id, hours=24)
+            verify_hours = max(1, int(getattr(settings, "SECURITY_UNVERIFIED_PURGE_HOURS", 1) or 1))
+            code = issue_verify_code(session, user.id, hours=verify_hours)
             session.commit()
             send_verify_email(
                 email,
                 _verify_code_link(email, code),
                 user.username,
                 code=code,
+                hours=verify_hours,
             )
     return msg
 
@@ -706,7 +710,8 @@ async def update_email(
             session.commit()
             session.refresh(db_user)
             raise HTTPException(status_code=503, detail="Почта не настроена — напишите админу")
-        code = issue_verify_code(session, db_user.id, hours=24)
+        verify_hours = max(1, int(getattr(settings, "SECURITY_UNVERIFIED_PURGE_HOURS", 1) or 1))
+        code = issue_verify_code(session, db_user.id, hours=verify_hours)
         session.commit()
         session.refresh(db_user)
         send_verify_email(
@@ -714,6 +719,7 @@ async def update_email(
             _verify_code_link(email_norm, code),
             db_user.username,
             code=code,
+            hours=verify_hours,
         )
         return _user_response(db_user)
 

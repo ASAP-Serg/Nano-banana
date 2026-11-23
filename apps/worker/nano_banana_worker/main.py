@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import time
 
-from nano_banana.account_maintenance import deactivate_stale_unverified
+from nano_banana.account_maintenance import deactivate_stale_unverified, purge_unverified_pending
 from nano_banana.generation.cleanup import cleanup_old_generations, fail_stuck_generations, reclaim_unlocked_jobs
 from nano_banana.generation.processor import process_generation
 from nano_banana.queue.jobs import get_job_queue
@@ -31,6 +31,7 @@ def main() -> None:
             try:
                 fail_stuck_generations()
                 cleanup_old_generations(storage)
+                purge_unverified_pending()
                 deactivate_stale_unverified()
                 reclaim_unlocked_jobs()
             except Exception as exc:

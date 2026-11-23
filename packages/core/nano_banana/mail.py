@@ -155,10 +155,23 @@ def send_email(*, to: str, subject: str, html_body: str, text: Optional[str] = N
         return False
 
 
-def send_verify_email(to: str, verify_url: str, username: str, *, code: str = "") -> bool:
+def send_verify_email(
+    to: str,
+    verify_url: str,
+    username: str,
+    *,
+    code: str = "",
+    hours: int | None = None,
+) -> bool:
     safe_name = html.escape((username or "друг").strip() or "друг")
     link = _safe_link(verify_url)
     code_digits = "".join(ch for ch in str(code or "") if ch.isdigit())
+    ttl = int(hours) if hours is not None else int(
+        getattr(settings, "SECURITY_UNVERIFIED_PURGE_HOURS", 1) or 1
+    )
+    if ttl <= 0:
+        ttl = 24
+    ttl_label = f"{ttl} час" if ttl == 1 else (f"{ttl} часа" if 2 <= ttl <= 4 else f"{ttl} часов")
     code_block = ""
     text_code = ""
     if len(code_digits) == 6:
@@ -174,7 +187,8 @@ def send_verify_email(to: str, verify_url: str, username: str, *, code: str = ""
         subject="Подтвердите email — Nano Banana",
         text=(
             f"Здравствуйте!\n{text_code}\n"
-            f"Или откройте ссылку: {verify_url}\n\nКод/ссылка действуют 24 часа."
+            f"Или откройте ссылку: {verify_url}\n\n"
+            f"Код/ссылка действуют {ttl_label}. После этого незавершённая регистрация удалится."
         ),
         html_body=(
             f"{_brand_header_html()}"
@@ -182,7 +196,9 @@ def send_verify_email(to: str, verify_url: str, username: str, *, code: str = ""
             f"<p>Подтвердите email, чтобы завершить регистрацию в Nano Banana.</p>"
             f"{code_block}"
             f'<p style="margin-top:16px"><a href="{link}">Или подтвердить по ссылке</a></p>'
-            f"<p style='color:#666;font-size:13px'>Действует 24 часа. Если это не вы — просто игнорируйте письмо.</p>"
+            f"<p style='color:#666;font-size:13px'>Действует {html.escape(ttl_label)}. "
+            f"После этого незавершённая регистрация будет удалена. "
+            f"Если это не вы — просто игнорируйте письмо.</p>"
         ),
     )
 
