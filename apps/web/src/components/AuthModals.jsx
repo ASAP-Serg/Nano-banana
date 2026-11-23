@@ -44,6 +44,8 @@ function GoogleButton({ label }) {
   );
 }
 
+const VERIFY_PENDING_KEY = "nb_verify_pending_email";
+
 /** mode: signin | signup | forgot | reset | verify_sent | complete_profile | totp */
 export default function AuthModals({
   showLogin,
@@ -97,23 +99,35 @@ export default function AuthModals({
     if (showLogin || showTotpComplete) setRemember(true);
     if (showLogin) {
       setEmailMode(false);
-      setVerifyPendingEmail("");
-      setVerifyCode("");
       setResendNote("");
     }
-    if (showRegister && !initialVerifyEmail) {
+  }, [showLogin, showTotpComplete]);
+
+  useEffect(() => {
+    if (!showRegister) return;
+    const stored = (() => {
+      try {
+        return sessionStorage.getItem(VERIFY_PENDING_KEY) || "";
+      } catch {
+        return "";
+      }
+    })();
+    const pending = initialVerifyEmail || stored;
+    if (pending) {
+      setEmailMode(true);
+      setVerifyPendingEmail(pending);
+      setVerifyCode(initialVerifyCode || "");
+      setResendNote("");
+      try {
+        sessionStorage.setItem(VERIFY_PENDING_KEY, pending);
+      } catch {
+        /* ignore */
+      }
+    } else {
       setEmailMode(false);
       setVerifyPendingEmail("");
       setVerifyCode("");
       setResendNote("");
-    }
-  }, [showLogin, showRegister, showTotpComplete, initialVerifyEmail]);
-
-  useEffect(() => {
-    if (showRegister && initialVerifyEmail) {
-      setEmailMode(true);
-      setVerifyPendingEmail(initialVerifyEmail);
-      setVerifyCode(initialVerifyCode || "");
     }
   }, [showRegister, initialVerifyEmail, initialVerifyCode]);
 
@@ -134,7 +148,7 @@ export default function AuthModals({
   return (
     <>
       {openAuth && (
-        <Modal title="" onClose={closeAuth}>
+        <Modal title="" onClose={closeAuth} closeOnBackdrop={false} closeOnEscape>
           <div className="nb-auth">
             <div className="nb-auth-brand">Nano Banana</div>
             <h2 className="nb-auth-title">{isRegister ? "Создать аккаунт" : "С возвращением"}</h2>
@@ -170,6 +184,13 @@ export default function AuthModals({
                       setResendNote("");
                       try {
                         await onVerifyCode(verifyPendingEmail, verifyCode);
+                        try {
+                          sessionStorage.removeItem(VERIFY_PENDING_KEY);
+                        } catch {
+                          /* ignore */
+                        }
+                        setVerifyPendingEmail("");
+                        setVerifyCode("");
                       } catch (err) {
                         setResendNote(err?.message || "Неверный код");
                       } finally {
@@ -231,6 +252,11 @@ export default function AuthModals({
                       if (result?.needs_verification) {
                         setVerifyPendingEmail(email);
                         setEmailMode(true);
+                        try {
+                          sessionStorage.setItem(VERIFY_PENDING_KEY, email);
+                        } catch {
+                          /* ignore */
+                        }
                         setResendNote("Если письма нет через минуту — нажмите «Отправить код снова».");
                       }
                     } finally {

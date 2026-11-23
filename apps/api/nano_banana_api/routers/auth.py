@@ -555,7 +555,8 @@ async def _consume_verify_and_login(token: str, response: Response) -> bool:
         if uid is None:
             return False
         user = session.query(User).filter(User.id == uid).first()
-        if not user or not user.is_active:
+        # Allow inactive stubs waiting on first email confirm.
+        if not user or (not user.is_active and bool(getattr(user, "email_verified", False))):
             return False
         user.email_verified = True
         user.is_active = True
@@ -611,8 +612,11 @@ async def verify_email_code(body: VerifyEmailCodeRequest, request: Request, resp
     email = str(body.email).strip().lower()
     with db_service.get_session() as session:
         user = session.query(User).filter(User.email == email).first()
-        if not user or not user.is_active:
+        if not user:
             raise HTTPException(status_code=400, detail="Неверный код или email")
+        # Inactive + already verified = disabled account. Inactive + unverified = waiting for code.
+        if not user.is_active and bool(getattr(user, "email_verified", False)):
+            raise HTTPException(status_code=400, detail="Аккаунт отключён")
         if bool(getattr(user, "email_verified", False)):
             if not user.is_active:
                 user.is_active = True

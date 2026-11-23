@@ -317,7 +317,7 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
                     </td>
                     <td>
                       <div className="d-flex flex-wrap gap-1">
-                        {!u.is_admin && (
+                        {!u.is_admin && u.email_verified && (
                           u.is_approved ? (
                             <button
                               className="btn btn-sm btn-outline-warning"
@@ -341,6 +341,9 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
                               Апрув
                             </button>
                           )
+                        )}
+                        {!u.is_admin && !u.email_verified && (
+                          <span className="small text-muted align-self-center">ждёт email</span>
                         )}
                         {u.is_superadmin ? (
                           <span className="small text-muted align-self-center">владелец</span>
