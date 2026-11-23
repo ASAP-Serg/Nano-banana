@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm.attributes import flag_modified
 
+from nano_banana.access import require_gallery_access, require_sensitive_access
 from nano_banana.auth import auth_service
 from nano_banana.config import settings
 from nano_banana.db.models import Generation, MosaicPrompt, User
@@ -91,8 +92,6 @@ async def generate_image(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
 ):
     with db_service.get_session() as _sess:
-        from nano_banana.access import require_sensitive_access
-
         _u = _sess.query(User).filter(User.id == user.user_id).first()
         if not _u or not _u.is_active:
             raise HTTPException(status_code=403, detail="Аккаунт отключён.")
@@ -295,6 +294,7 @@ async def list_generations(
         db_user = session.query(User).filter(User.id == user.user_id).first()
         if not db_user:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        require_gallery_access(db_user)
         total_count = session.query(Generation).filter(Generation.user_id == user.user_id).count()
         generations = (
             session.query(Generation)
@@ -422,8 +422,6 @@ async def get_provider_status(
     model_name: Optional[str] = None,
 ):
     with db_service.get_session() as session:
-        from nano_banana.access import require_sensitive_access
-
         db_user = session.query(User).filter(User.id == user.user_id).first()
         if not db_user or not db_user.is_active:
             raise HTTPException(status_code=403, detail="Аккаунт отключён.")
@@ -483,6 +481,11 @@ async def get_generation_file(
     )
     with db_service.get_session() as session:
         generation = _load_accessible_generation(session, generation_id, user)
+        if generation.user_id == user.user_id:
+            db_user = session.query(User).filter(User.id == user.user_id).first()
+            if not db_user:
+                raise HTTPException(status_code=404, detail="Генерация не найдена")
+            require_gallery_access(db_user)
         source = getattr(generation, "result_path", None) or generation.result_url
         if not source or (
             isinstance(source, str) and source.startswith(("https://", "http://"))
@@ -511,6 +514,11 @@ async def get_generation_reference(
     )
     with db_service.get_session() as session:
         generation = _load_accessible_generation(session, generation_id, user)
+        if generation.user_id == user.user_id:
+            db_user = session.query(User).filter(User.id == user.user_id).first()
+            if not db_user:
+                raise HTTPException(status_code=404, detail="Генерация не найдена")
+            require_gallery_access(db_user)
         stored = (generation.generation_metadata or {}).get("reference_image_urls") or []
         if index < 0 or index >= len(stored) or not stored[index]:
             raise HTTPException(status_code=404, detail="Генерация не найдена")
@@ -536,6 +544,10 @@ async def get_generation_full(
         "Слишком много запросов. Подождите.",
     )
     with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Генерация не найдена")
+        require_gallery_access(db_user)
         generation = session.query(Generation).filter(
             Generation.id == generation_id,
             Generation.user_id == user.user_id,
@@ -586,6 +598,10 @@ async def delete_generation(
         "Слишком много удалений. Подождите.",
     )
     with db_service.get_session() as session:
+        db_user = session.query(User).filter(User.id == user.user_id).first()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="Генерация не найдена")
+        require_gallery_access(db_user)
         generation = session.query(Generation).filter(
             Generation.id == generation_id,
             Generation.user_id == user.user_id,

@@ -81,8 +81,9 @@ async def set_api_key(
 async def get_api_key_status(user: Annotated[TokenPayload, Depends(auth_service.get_current_user)]):
     with db_service.get_session() as session:
         db_user = session.query(User).filter(User.id == user.user_id).first()
-        if not db_user:
+        if not db_user or not db_user.is_active:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        require_sensitive_access(db_user)
         keys = parse_stored_keys(db_user.replicate_api_key)
     message = "Ключи сохранены на сервере (зашифрованы)" if any(keys.values()) else "Ключи на сервере не сохранены"
     return _key_response(message, keys)

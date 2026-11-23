@@ -37,6 +37,17 @@ def generate_block_reason(user) -> Optional[str]:
     return None
 
 
+def gallery_block_reason(user) -> Optional[str]:
+    """Same gates as generate — revoked/unapproved users cannot read own media either."""
+    if not bool(getattr(user, "is_active", True)):
+        return "Аккаунт отключён."
+    if not email_ok_for_generate(user):
+        return "Подтвердите email, чтобы открыть галерею."
+    if not approval_ok_for_generate(user):
+        return "Аккаунт ждёт подтверждения администратором. Галерея недоступна."
+    return None
+
+
 def access_flags(user) -> Tuple[bool, bool]:
     return email_ok_for_generate(user), approval_ok_for_generate(user)
 
@@ -44,5 +55,12 @@ def access_flags(user) -> Tuple[bool, bool]:
 def require_sensitive_access(user) -> None:
     """Raise 403 unless user may use generate / store provider API keys."""
     reason = generate_block_reason(user)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+
+
+def require_gallery_access(user) -> None:
+    """Raise 403 unless user may list/view/delete their generations and media."""
+    reason = gallery_block_reason(user)
     if reason:
         raise HTTPException(status_code=403, detail=reason)
