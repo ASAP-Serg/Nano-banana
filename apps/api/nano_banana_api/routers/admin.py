@@ -559,6 +559,13 @@ async def admin_activate_user(
     with db_service.get_session() as session:
         target = _target_user(session, target_user_id)
         _forbid_self(user, target)
+        if not bool(getattr(target, "email_verified", False)) and not bool(
+            getattr(target, "google_sub", None)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Сначала пользователь должен подтвердить email",
+            )
         target.is_active = True
         _audit_admin_action(
             session=session,

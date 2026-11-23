@@ -174,7 +174,7 @@ def send_verify_email(
     ttl_label = f"{ttl} час" if ttl == 1 else (f"{ttl} часа" if 2 <= ttl <= 4 else f"{ttl} часов")
     code_block = ""
     text_code = ""
-    if len(code_digits) == 6:
+    if len(code_digits) in (6, 8):
         safe_code = html.escape(code_digits)
         code_block = (
             f"<p>Код подтверждения:</p>"

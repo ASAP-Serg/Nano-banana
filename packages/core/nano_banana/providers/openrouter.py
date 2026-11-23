@@ -52,18 +52,20 @@ def _map_aspect_ratio(aspect_ratio: str) -> str:
 
 
 def _build_input_references(reference_images: Optional[List[Any]]) -> List[dict]:
+    """Only data: URLs — never forward raw http(s) (SSRF / SSRF-via-provider)."""
     refs: List[dict] = []
     for img in reference_images or []:
         if not img:
             continue
         if isinstance(img, str):
             url = img.strip()
-            if not url:
-                continue
-            if url.startswith("data:image") or url.startswith("http://") or url.startswith("https://"):
+            if url.startswith("data:image"):
                 refs.append({"type": "image_url", "image_url": {"url": url}})
         elif isinstance(img, dict):
-            refs.append(img)
+            nested = ((img.get("image_url") or {}) if isinstance(img.get("image_url"), dict) else {})
+            nested_url = str(nested.get("url") or img.get("url") or "").strip()
+            if nested_url.startswith("data:image"):
+                refs.append({"type": "image_url", "image_url": {"url": nested_url}})
     return refs[:16]
 
 

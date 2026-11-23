@@ -206,13 +206,17 @@ export default function AuthModals({
                       className="nb-auth-input"
                       inputMode="numeric"
                       autoComplete="one-time-code"
-                      placeholder="6 цифр"
-                      maxLength={6}
+                      placeholder="8 цифр"
+                      maxLength={8}
                       value={verifyCode}
-                      onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
                       required
                     />
-                    <button type="submit" className="nb-auth-primary" disabled={verifyBusy || verifyCode.length !== 6}>
+                    <button
+                      type="submit"
+                      className="nb-auth-primary"
+                      disabled={verifyBusy || ![6, 8].includes(verifyCode.length)}
+                    >
                       {verifyBusy ? "Проверяем…" : "Подтвердить"}
                     </button>
                     <button
@@ -278,7 +282,7 @@ export default function AuthModals({
                   </button>
                   {mailEnabled && (
                     <p className="nb-auth-note">
-                      После регистрации введите 6-значный код из письма. Без подтверждения вход закрыт.
+                      После регистрации введите код из письма. Без подтверждения вход закрыт.
                     </p>
                   )}
                 </form>

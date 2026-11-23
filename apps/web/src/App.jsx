@@ -129,7 +129,7 @@ export default function App() {
       const hashParams = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
       const token = hashParams.get("token") || params.get("token") || "";
       const email = hashParams.get("email") || "";
-      const code = (hashParams.get("code") || "").replace(/\D/g, "").slice(0, 6);
+      const code = (hashParams.get("code") || "").replace(/\D/g, "").slice(0, 8);
       const url = new URL(window.location.href);
       url.searchParams.delete("auth");
       url.searchParams.delete("reason");

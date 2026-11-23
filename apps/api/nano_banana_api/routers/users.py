@@ -102,8 +102,9 @@ async def delete_api_key(
     )
     with db_service.get_session() as session:
         db_user = session.query(User).filter(User.id == user.user_id).first()
-        if not db_user:
+        if not db_user or not db_user.is_active:
             raise HTTPException(status_code=404, detail="Пользователь не найден")
+        require_sensitive_access(db_user)
         db_user.replicate_api_key = None
         session.commit()
     logger.info("[USER] Все API ключи удалены для пользователя %s", user.user_id)

@@ -263,10 +263,11 @@ def _verify_link(raw_token: str) -> str:
 
 
 def _verify_code_link(email: str, code: str) -> str:
+    # Prefer email-only fragment (no code in history/sync). `code` kept in signature for callers.
+    _ = code
     base = _frontend_base().rstrip("/")
     q = urlencode({"auth": "verify"})
-    # email+code in fragment — SPA can autofill the form.
-    return f"{base}/?{q}#email={email}&code={code}"
+    return f"{base}/?{q}#email={email}"
 
 
 def _reset_link(raw_token: str) -> str:
@@ -375,17 +376,10 @@ async def register(
             )
         existing_by_email = session.query(User).filter(User.email == email_norm).first()
         if existing_by_email:
-            if (
-                not bool(getattr(existing_by_email, "email_verified", False))
-                and existing_by_email.hashed_password
-            ):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Этот email уже ждёт подтверждения — введите код из письма или нажмите «Отправить код снова».",
-                )
+            # Same message for verified vs pending — no email enumeration.
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Этот email уже зарегистрирован. Войдите или восстановите пароль.",
+                detail="Этот email уже занят. Войдите, восстановите пароль или нажмите «Отправить код снова».",
             )
         make_admin = users_count == 0 and bootstrap_ok
         verified = make_admin or not (
@@ -604,14 +598,23 @@ async def verify_email_post(body: VerifyEmailRequest, request: Request, response
 
 @router.post("/verify-email-code")
 async def verify_email_code(body: VerifyEmailCodeRequest, request: Request, response: Response):
+    ip = client_ip_from_request(request)
     check_rate_limit(
-        "verify-email-code",
-        client_ip_from_request(request),
-        30,
+        "verify-email-code-ip",
+        ip,
+        40,
         3600,
         "Слишком много попыток подтверждения. Попробуйте позже.",
     )
     email = str(body.email).strip().lower()
+    # Per-email lockout: blocks distributed brute-force of the 6-digit space.
+    check_rate_limit(
+        "verify-email-code-email",
+        email,
+        8,
+        3600,
+        "Слишком много попыток для этого email. Запросите новый код позже.",
+    )
     with db_service.get_session() as session:
         user = session.query(User).filter(User.email == email).first()
         if not user:

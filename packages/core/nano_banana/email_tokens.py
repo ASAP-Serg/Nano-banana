@@ -40,13 +40,13 @@ def issue_token(session, user_id: int, purpose: str, *, hours: int) -> str:
 
 
 def issue_verify_code(session, user_id: int, *, hours: int = 24) -> str:
-    """6-digit email confirmation code (scoped to user_id)."""
+    """8-digit email confirmation code (scoped to user_id)."""
     session.query(AuthEmailToken).filter(
         AuthEmailToken.user_id == user_id,
         AuthEmailToken.purpose == PURPOSE_VERIFY,
         AuthEmailToken.used_at.is_(None),
     ).delete(synchronize_session=False)
-    raw = f"{secrets.randbelow(1_000_000):06d}"
+    raw = f"{secrets.randbelow(100_000_000):08d}"
     now = datetime.utcnow()
     session.add(
         AuthEmailToken(
@@ -87,9 +87,9 @@ def consume_token(session, raw: str, purpose: str) -> Optional[int]:
 
 
 def consume_verify_code(session, user_id: int, code: str) -> bool:
-    """Consume a 6-digit verify code for a specific user."""
+    """Consume an 8-digit verify code for a specific user (accept legacy 6)."""
     raw = "".join(ch for ch in str(code or "") if ch.isdigit())
-    if len(raw) != 6:
+    if len(raw) not in (6, 8):
         return False
     now = datetime.utcnow()
     row = (

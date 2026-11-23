@@ -197,8 +197,8 @@ class VerifyEmailCodeRequest(BaseModel):
     @classmethod
     def validate_verify_code(cls, v: str) -> str:
         digits = "".join(ch for ch in str(v or "") if ch.isdigit())
-        if len(digits) != 6:
-            raise ValueError("Введите 6-значный код из письма")
+        if len(digits) not in (6, 8):
+            raise ValueError("Введите код из письма")
         return digits
 
 
