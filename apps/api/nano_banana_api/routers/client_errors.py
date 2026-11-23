@@ -10,6 +10,8 @@ from typing import Annotated, Any, Optional
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
+from fastapi import HTTPException
+
 from nano_banana.auth import auth_service
 from nano_banana.queue.jobs import get_job_queue
 from nano_banana.rate_limit import check_rate_limit, client_ip_from_request
@@ -48,7 +50,7 @@ async def report_client_error(body: ClientErrorIn, request: Request):
     check_rate_limit(
         "client-errors",
         ip,
-        40,
+        20,
         60,
         "Слишком много отчётов об ошибках.",
     )
@@ -80,15 +82,19 @@ async def report_client_error(body: ClientErrorIn, request: Request):
     return {"ok": True}
 
 
+def _require_admin_totp(user: TokenPayload) -> None:
+    if not user.is_admin:
+        raise HTTPException(status_code=403, detail="Доступ только для админов")
+    if not user.totp_enabled:
+        raise HTTPException(status_code=403, detail="Включите двухфакторную аутентификацию")
+
+
 @router.get("/recent")
 async def recent_client_errors(
     user: Annotated[TokenPayload, Depends(auth_service.get_current_user)],
     limit: int = 50,
 ):
-    if not user.is_admin:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=403, detail="Доступ только для админов")
+    _require_admin_totp(user)
     limit = max(1, min(int(limit or 50), 200))
     try:
         client = get_job_queue().client

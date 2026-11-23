@@ -200,6 +200,14 @@ class Settings(BaseSettings):
             raise ValueError("POSTGRES_PASSWORD is weak — set a strong password in .env")
         if (self.MINIO_SECRET_KEY or "").strip().lower() in _WEAK_PASSWORDS:
             raise ValueError("MINIO_SECRET_KEY is weak — set a strong password in .env")
+        if (self.MINIO_ACCESS_KEY or "").strip().lower() in {
+            "minioadmin",
+            "admin",
+            "minio",
+            "change-me",
+            "changeme",
+        }:
+            raise ValueError("MINIO_ACCESS_KEY is weak — set a strong value in .env")
         api_lower = (self.API_URL or "").lower()
         if self.S3_PUBLIC_READ and api_lower.startswith("https://") and "localhost" not in api_lower:
             raise ValueError("S3_PUBLIC_READ=true запрещён в production (API_URL=https)")

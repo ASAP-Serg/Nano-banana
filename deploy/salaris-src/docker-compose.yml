@@ -4,8 +4,9 @@ services:
     container_name: salaris-api
     restart: unless-stopped
     ports:
-      - "5000:5000"
-      - "5900:5900"   # VNC: подключись к серверу:5900, чтобы смотреть сессию Chrome
+      # Loopback only — nginx proxies /salaris; VNC via SSH tunnel (ssh -L 5900:127.0.0.1:5900).
+      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:5900:5900"
     env_file:
       - .env
     volumes:

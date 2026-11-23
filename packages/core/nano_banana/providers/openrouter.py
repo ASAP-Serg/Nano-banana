@@ -125,10 +125,10 @@ class OpenRouterService:
             payload["input_references"] = refs
 
         logger.info(
-            "[OPENROUTER] Генерация model=%s (%s), prompt=%s...",
+            "[OPENROUTER] Генерация model=%s (%s), prompt_chars=%s",
             model_name,
             slug,
-            prompt[:100],
+            len(prompt or ""),
         )
 
         last_error = "Неизвестная ошибка OpenRouter"
@@ -270,11 +270,11 @@ class OpenRouterService:
             result = self._chat_rewrite(PROMPT_REWRITE_AFTER_BLOCK_SYSTEM, user_message, model)
             if result.get("success") and result.get("prompt"):
                 logger.info(
-                    "[OPENROUTER] policy rewrite attempt=%s model=%s | in=%s | out=%s",
+                    "[OPENROUTER] policy rewrite attempt=%s model=%s | in_chars=%s out_chars=%s",
                     n,
                     model,
-                    text[:160],
-                    result["prompt"][:160],
+                    len(text),
+                    len(str(result.get("prompt") or "")),
                 )
                 return {**result, "original": text, "block_reason": reason, "attempt": n}
             last_error = result.get("error") or last_error
@@ -297,10 +297,10 @@ class OpenRouterService:
             result = self._chat_rewrite(PROMPT_ENHANCE_SYSTEM, user_message, model)
             if result.get("success") and result.get("prompt"):
                 logger.info(
-                    "[OPENROUTER] enhance model=%s | original=%s | enhanced=%s",
+                    "[OPENROUTER] enhance model=%s | original_chars=%s enhanced_chars=%s",
                     model,
-                    text[:200],
-                    result["prompt"][:200],
+                    len(text),
+                    len(str(result.get("prompt") or "")),
                 )
                 return {**result, "original": text}
             last_error = result.get("error") or last_error
