@@ -224,30 +224,59 @@ class OpenRouterService:
         except requests.RequestException as exc:
             return {"success": False, "error": f"OpenRouter: ошибка сети — {exc}", "model": model}
 
-    def rewrite_prompt_after_block(self, prompt: str, block_reason: str) -> Dict[str, Any]:
-        """GPT-переписывание после отказа фильтра; пробует несколько chat-моделей."""
+    def rewrite_prompt_after_block(
+        self,
+        prompt: str,
+        block_reason: str,
+        *,
+        attempt: int = 1,
+        original_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """GPT-переписывание после отказа фильтра; пробует несколько chat-моделей.
+
+        attempt=1 — мягко, ближе к замыслу; attempt>=2 — сильнее смягчить
+        (предыдущая версия всё ещё не прошла фильтр).
+        """
         text = (prompt or "").strip()
         reason = (block_reason or "").strip()
         if not text:
             return {"success": False, "error": "Пустой промпт"}
 
+        n = max(int(attempt or 1), 1)
+        orig = (original_prompt or "").strip()
+        if n <= 1:
+            extra = (
+                "Перепиши мягко, чтобы прошло фильтр, но результат был максимально близок "
+                "к тому, что хотел пользователь."
+            )
+        else:
+            extra = (
+                f"Это попытка #{n}: предыдущая мягкая версия ВСЁ ЕЩЁ отклонена фильтром. "
+                "Смягчи ЗАМЕТНО сильнее: убери intimate/nude/bedroom-sensual намёки, "
+                "сделай полностью одетого персонажа, дневной/нейтральный свет, "
+                "портрет или бытовая сцена. Сохрани lookalike внешности без имени. "
+                "Цель — чтобы генка точно прошла, оставаясь узнаваемо близкой к замыслу."
+            )
+            if orig and orig != text:
+                extra = f"Исходный замысел пользователя:\n{orig}\n\n{extra}"
+
         user_message = (
             f"Отклонённый промпт:\n{text}\n\n"
             f"Причина отказа провайдера:\n{reason or 'content policy'}\n\n"
-            "Перепиши мягко, чтобы прошло фильтр, но результат был максимально близок "
-            "к тому, что хотел пользователь. Один image prompt, без пояснений."
+            f"{extra} Один image prompt, без пояснений."
         )
         last_error = "Не удалось переписать промпт"
         for model in self._rewrite_model_ids():
             result = self._chat_rewrite(PROMPT_REWRITE_AFTER_BLOCK_SYSTEM, user_message, model)
             if result.get("success") and result.get("prompt"):
                 logger.info(
-                    "[OPENROUTER] policy rewrite model=%s | in=%s | out=%s",
+                    "[OPENROUTER] policy rewrite attempt=%s model=%s | in=%s | out=%s",
+                    n,
                     model,
                     text[:160],
                     result["prompt"][:160],
                 )
-                return {**result, "original": text, "block_reason": reason}
+                return {**result, "original": text, "block_reason": reason, "attempt": n}
             last_error = result.get("error") or last_error
             logger.warning("[OPENROUTER] policy rewrite failed model=%s: %s", model, last_error)
 

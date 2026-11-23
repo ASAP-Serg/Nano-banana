@@ -226,14 +226,23 @@ def _try_policy_gpt_rewrite(generation, session, generation_id: int, prompt: str
     openrouter_key = keys.get("openrouter")
     if not openrouter_key:
         return None
-    rewrite_result = OpenRouterService(api_key=openrouter_key).rewrite_prompt_after_block(prompt, block_reason)
+    if not generation.generation_metadata:
+        generation.generation_metadata = {}
+    attempts = list(generation.generation_metadata.get("policy_gpt_attempts") or [])
+    attempt_n = len(attempts) + 1
+    original_prompt = str(
+        generation.generation_metadata.get("original_prompt") or generation.prompt or prompt or ""
+    )
+    rewrite_result = OpenRouterService(api_key=openrouter_key).rewrite_prompt_after_block(
+        prompt,
+        block_reason,
+        attempt=attempt_n,
+        original_prompt=original_prompt,
+    )
     if rewrite_result.get("success") and rewrite_result.get("prompt"):
-        if not generation.generation_metadata:
-            generation.generation_metadata = {}
-        attempts = list(generation.generation_metadata.get("policy_gpt_attempts") or [])
         attempts.append(
             {
-                "attempt": len(attempts) + 1,
+                "attempt": attempt_n,
                 "block_reason": (block_reason or "")[:500],
                 "rewritten_prompt": rewrite_result.get("prompt"),
                 "model": rewrite_result.get("model"),
@@ -299,8 +308,8 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
             generation.status = "running"
             if not generation.generation_metadata:
                 generation.generation_metadata = {}
-            generation.generation_metadata["status_detail"] = "Отправляем задачу в Moonez…"
-            generation.generation_metadata["provider_phase"] = "submitting"
+            generation.generation_metadata["status_detail"] = "Подготовка генерации…"
+            generation.generation_metadata["provider_phase"] = "preparing"
             flag_modified(generation, "generation_metadata")
             session.commit()
             queue.refresh_lock(generation_id)
@@ -317,6 +326,15 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 _fail(generation, session, "Нет API ключа для этой модели")
                 return
             provider_label_text = provider_label(provider)
+            if provider == "bananalab":
+                generation.generation_metadata["status_detail"] = "Отправляем задачу в Moonez…"
+            elif provider == "openrouter":
+                generation.generation_metadata["status_detail"] = "Отправляем задачу в OpenRouter…"
+            else:
+                generation.generation_metadata["status_detail"] = f"Отправляем задачу ({provider_label_text})…"
+            generation.generation_metadata["provider_phase"] = "submitting"
+            flag_modified(generation, "generation_metadata")
+            session.commit()
 
             try:
                 if provider == "bananalab":
