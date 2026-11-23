@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { api } from "../api.js";
 import { toast } from "../toast.js";
+import DiscordUsernameField, { composeDiscordUsername, splitDiscordUsername } from "./DiscordUsernameField.jsx";
 import Modal from "./Modal.jsx";
 
 export default function AccountModal({ user, onClose, onUsernameChanged, onUserUpdated, onDeleted }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [username, setUsername] = useState(user?.username || "");
+  const initialParts = splitDiscordUsername(user?.username || "");
+  const [nick, setNick] = useState(initialParts.nick);
+  const [tag, setTag] = useState(initialParts.tag);
   const [email, setEmail] = useState(user?.email || "");
   const [deletePassword, setDeletePassword] = useState("");
   const [deletePhrase, setDeletePhrase] = useState("");
@@ -31,9 +34,17 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
 
   async function saveUsername(e) {
     e.preventDefault();
+    const username = composeDiscordUsername(nick, tag);
+    if (nick.trim().length < 2 || tag.length !== 4) {
+      toast("Нужен ник и ровно 4 цифры тега", "error");
+      return;
+    }
     try {
-      const next = await api.changeUsername(hasPassword ? currentPassword : "", username.trim());
+      const next = await api.changeUsername(hasPassword ? currentPassword : "", username);
       onUsernameChanged(next);
+      const parts = splitDiscordUsername(next?.username || username);
+      setNick(parts.nick);
+      setTag(parts.tag);
       toast("Имя изменено");
     } catch (err) {
       toast(err.message, "error");
@@ -184,7 +195,7 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
         <p className="small text-muted mb-3">Вход только через Google — локального пароля нет.</p>
       )}
       <form onSubmit={saveUsername} className="mb-4">
-        <label className="form-label">Сменить имя</label>
+        <label className="form-label">Сменить имя (ник#тег)</label>
         {hasPassword && (
           <input
             className="form-control mb-2"
@@ -196,15 +207,23 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
             required
           />
         )}
-        <input
-          className="form-control mb-2"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          minLength={3}
-          maxLength={32}
-          required
-        />
-        <button className="btn btn-outline-primary">Сохранить имя</button>
+        <div className="mb-2">
+          <DiscordUsernameField
+            name={null}
+            nick={nick}
+            tag={tag}
+            onChange={({ nick: n, tag: t }) => {
+              setNick(n);
+              setTag(t);
+            }}
+            className="form-control"
+            idPrefix="account"
+          />
+        </div>
+        <p className="small text-muted">Пара ник#тег должна быть свободной (как в Discord).</p>
+        <button className="btn btn-outline-primary" disabled={nick.trim().length < 2 || tag.length !== 4}>
+          Сохранить имя
+        </button>
       </form>
       {user?.totp_enabled && (
         <div className="border-top pt-3 mb-4">

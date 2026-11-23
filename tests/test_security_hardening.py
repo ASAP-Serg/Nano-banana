@@ -207,10 +207,10 @@ class TestRateLimitFailClosed(unittest.TestCase):
 
 
 class TestUsernameRules(unittest.TestCase):
-    def test_plain_and_cyrillic_ok(self):
+    def test_discord_style_ok(self):
         from nano_banana.schemas import UserCreateRequest
 
-        for name in ("serg", "nomad", "Анастасия", "nano_banana"):
+        for name in ("serg#0421", "nomad#0001", "Анастасия#7788", "nano_banana#9999"):
             user = UserCreateRequest(username=name, email="user@example.com", password="1234567890")
             self.assertEqual(user.username, name)
 
@@ -226,6 +226,10 @@ class TestUsernameRules(unittest.TestCase):
             " ab",
             "_root",
             "x" * 33,
+            "serg",  # no tag
+            "serg#12",  # short tag
+            "serg#abcd",
+            "#1234",
         ):
             with self.assertRaises(ValidationError):
                 UserCreateRequest(
@@ -677,9 +681,10 @@ class TestTrustedDeviceAndGoogle(unittest.TestCase):
         from nano_banana.google_oauth import username_from_google
 
         name = username_from_google("serg.test@gmail.com", "")
-        self.assertGreaterEqual(len(name), 3)
-        self.assertLessEqual(len(name), 32)
+        self.assertGreaterEqual(len(name), 2)
+        self.assertLessEqual(len(name), 28)
         self.assertNotIn("@", name)
+        self.assertNotIn("#", name)
 
     def test_login_schema_has_remember_device(self):
         from nano_banana.schemas import UserLoginRequest, TotpCompleteRequest

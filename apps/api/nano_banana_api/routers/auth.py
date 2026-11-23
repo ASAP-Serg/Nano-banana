@@ -371,7 +371,7 @@ async def register(
         if existing_by_name:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Это имя уже занято. Выберите другое или войдите.",
+                detail="Это имя#тег уже занято. Смените тег или ник.",
             )
         existing_by_email = session.query(User).filter(User.email == email_norm).first()
         if existing_by_email:
@@ -465,7 +465,7 @@ async def login(user_data: UserLoginRequest, request: Request, response: Respons
         raw_ident = user_data.username_or_email.strip()
         user = session.query(User).filter(
             or_(
-                User.username == raw_ident,
+                User.username.ilike(raw_ident),
                 User.email == ident,
             )
         ).first()
@@ -856,9 +856,13 @@ async def profile_complete(
         if not user or not user.is_active:
             _clear_pending_profile_cookie(response)
             raise HTTPException(status_code=401, detail="Сессия регистрации истекла — войдите снова")
-        taken = session.query(User).filter(User.username == body.username, User.id != user.id).first()
+        taken = (
+            session.query(User)
+            .filter(User.username.ilike(body.username), User.id != user.id)
+            .first()
+        )
         if taken:
-            raise HTTPException(status_code=409, detail="Это имя уже занято")
+            raise HTTPException(status_code=409, detail="Это имя#тег уже занято — смените тег или ник")
         user.username = body.username
         user.email_verified = True
         session.commit()
@@ -966,9 +970,13 @@ async def change_username(
                 raise HTTPException(status_code=400, detail="Текущий пароль не подошёл")
         elif not getattr(db_user, "google_sub", None):
             raise HTTPException(status_code=400, detail="Нельзя сменить имя")
-        taken = session.query(User).filter(User.username == body.username, User.id != db_user.id).first()
+        taken = (
+            session.query(User)
+            .filter(User.username.ilike(body.username), User.id != db_user.id)
+            .first()
+        )
         if taken:
-            raise HTTPException(status_code=409, detail="Это имя уже занято")
+            raise HTTPException(status_code=409, detail="Это имя#тег уже занято — смените тег или ник")
         db_user.username = body.username
         session.commit()
         return _user_response(db_user)

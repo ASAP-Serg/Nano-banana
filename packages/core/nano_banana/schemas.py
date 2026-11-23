@@ -14,20 +14,49 @@ ALLOWED_RESOLUTIONS = frozenset({"1K", "2K", "4K"})
 ALLOWED_ASPECT_RATIOS = frozenset({"1:1", "16:9", "9:16", "4:3", "3:4", "21:9", "5:4", "2:3"})
 ALLOWED_GENERATION_MODES = frozenset({"text-to-image", "image-to-image", "mosaic"})
 
-_USERNAME_RE = re.compile(r"^[\w.-]{3,32}$", re.UNICODE)
+# Discord-style: nick#1234 (nick 2–28, tag exactly 4 digits).
+_NICK_RE = re.compile(r"^[\w.-]{2,28}$", re.UNICODE)
+_TAG_RE = re.compile(r"^\d{4}$")
+_USERNAME_RE = re.compile(r"^[\w.-]{2,28}#\d{4}$", re.UNICODE)
+
+
+def normalize_nick(value: str) -> str:
+    nick = (value or "").strip()
+    if (
+        not _NICK_RE.fullmatch(nick)
+        or nick[0] in ".-_"
+        or nick[-1] in ".-"
+        or "<" in nick
+        or ">" in nick
+        or "#" in nick
+    ):
+        raise ValueError("Ник: 2–28 символов, буквы и цифры, внутри можно . _ -")
+    return nick
+
+
+def normalize_tag(value: str) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if len(digits) != 4:
+        raise ValueError("Тег: ровно 4 цифры (как в Discord)")
+    return digits
+
+
+def compose_username(nick: str, tag: str) -> str:
+    return f"{normalize_nick(nick)}#{normalize_tag(tag)}"
+
+
+def split_username(value: str) -> tuple[str, str]:
+    text = (value or "").strip()
+    if "#" not in text:
+        raise ValueError("Формат имени: ник#1234")
+    nick, _, tag = text.rpartition("#")
+    return normalize_nick(nick), normalize_tag(tag)
 
 
 def normalize_username(value: str) -> str:
-    name = (value or "").strip()
-    if (
-        not _USERNAME_RE.fullmatch(name)
-        or name[0] in ".-_"
-        or name[-1] in ".-"
-        or "<" in name
-        or ">" in name
-    ):
-        raise ValueError("Имя: 3–32 символа, буквы и цифры, внутри можно . _ -")
-    return name
+    """Full Discord-style username nick#dddd."""
+    nick, tag = split_username(value)
+    return f"{nick}#{tag}"
 
 
 # Аутентификация

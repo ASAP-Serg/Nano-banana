@@ -597,6 +597,36 @@ h1, h2, h3, h4, h5, .h5, .navbar-brand {
     flex: 1;
 }
 
+.nb-discord-user {
+    display: flex;
+    align-items: stretch;
+    gap: 0.35rem;
+    width: 100%;
+}
+
+.nb-discord-nick {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.nb-discord-hash {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 0.15rem;
+    font-weight: 700;
+    opacity: 0.65;
+    user-select: none;
+}
+
+.nb-discord-tag {
+    flex: 0 0 4.75rem;
+    width: 4.75rem;
+    text-align: center;
+    letter-spacing: 0.12em;
+    font-variant-numeric: tabular-nums;
+}
+
 .nb-auth-eye {
     border: 1px solid rgba(127, 127, 127, 0.35);
     background: transparent;

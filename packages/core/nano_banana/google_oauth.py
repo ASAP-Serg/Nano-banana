@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 import requests
 
 from nano_banana.config import settings
-from nano_banana.schemas import normalize_username
+from nano_banana.schemas import compose_username, normalize_nick
 
 logger = logging.getLogger(__name__)
 
@@ -92,26 +92,36 @@ _SAFE_USER_RE = re.compile(r"[^\w.-]", re.UNICODE)
 
 
 def username_from_google(email: str, display_name: str = "") -> str:
+    """Return nick only (no #tag); caller allocates tag via unique_username."""
     local = (email or "").split("@", 1)[0]
     raw = _SAFE_USER_RE.sub("", (display_name or local or "user").replace(" ", "_"))
     raw = raw.strip(".-_") or "user"
-    if len(raw) < 3:
-        raw = (raw + "user")[:32]
-    raw = raw[:32]
+    if len(raw) < 2:
+        raw = (raw + "user")[:28]
+    raw = raw[:28]
     try:
-        return normalize_username(raw)
+        return normalize_nick(raw)
     except ValueError:
-        return normalize_username(("u_" + raw)[:32].lstrip(".-_") or "user01")
+        return normalize_nick(("u_" + raw)[:28].lstrip(".-_") or "user01")
 
 
 def unique_username(session, User, base: str) -> str:
-    candidate = base
-    n = 0
-    while session.query(User).filter(User.username == candidate).first():
-        n += 1
-        suffix = f"_{n}"
-        candidate = (base[: max(3, 32 - len(suffix))] + suffix)[:32]
-        if n > 9999:
-            candidate = f"user{secrets.token_hex(4)}"
-            break
-    return candidate
+    """Allocate unused Discord-style username nick#dddd."""
+    try:
+        nick = normalize_nick(base.split("#", 1)[0] if base else "user")
+    except ValueError:
+        nick = "user"
+    for _ in range(250):
+        tag = f"{secrets.randbelow(10000):04d}"
+        candidate = compose_username(nick, tag)
+        taken = session.query(User).filter(User.username.ilike(candidate)).first()
+        if not taken:
+            return candidate
+    # Extremely unlikely: fall back to random nick.
+    for _ in range(50):
+        nick = f"user{secrets.token_hex(3)}"
+        tag = f"{secrets.randbelow(10000):04d}"
+        candidate = compose_username(nick, tag)
+        if not session.query(User).filter(User.username.ilike(candidate)).first():
+            return candidate
+    return compose_username(f"user{secrets.token_hex(4)}", f"{secrets.randbelow(10000):04d}")

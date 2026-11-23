@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
+import DiscordUsernameField, { splitDiscordUsername } from "./DiscordUsernameField.jsx";
 import Modal from "./Modal.jsx";
 
 function GoogleIcon() {
@@ -79,7 +80,8 @@ export default function AuthModals({
 }) {
   const [remember, setRemember] = useState(true);
   const [emailMode, setEmailMode] = useState(false);
-  const [profileName, setProfileName] = useState("");
+  const [profileNick, setProfileNick] = useState("");
+  const [profileTag, setProfileTag] = useState("");
   const [resetPassword, setResetPassword] = useState("");
   const [verifyPendingEmail, setVerifyPendingEmail] = useState("");
   const [verifyCode, setVerifyCode] = useState("");
@@ -117,7 +119,9 @@ export default function AuthModals({
 
   useEffect(() => {
     if (showCompleteProfile && profileDraft?.suggested_username) {
-      setProfileName(profileDraft.suggested_username);
+      const parts = splitDiscordUsername(profileDraft.suggested_username);
+      setProfileNick(parts.nick);
+      setProfileTag(parts.tag);
     }
   }, [showCompleteProfile, profileDraft]);
 
@@ -234,19 +238,11 @@ export default function AuthModals({
                     }
                   }}
                 >
-                  <label className="nb-auth-label">Имя</label>
-                  <input
-                    className="nb-auth-input"
-                    name="username"
-                    placeholder="Как к вам обращаться"
-                    required
-                    minLength={3}
-                    maxLength={32}
-                    autoComplete="username"
-                    autoCapitalize="none"
-                    spellCheck={false}
-                    disabled={registerBusy}
-                  />
+                  <label className="nb-auth-label">Имя (ник#тег)</label>
+                  <DiscordUsernameField name="username" disabled={registerBusy} idPrefix="reg" />
+                  <p className="nb-auth-note" style={{ marginTop: 0 }}>
+                    Как в Discord: ник и 4 цифры. Пара ник#тег должна быть уникальной.
+                  </p>
                   <label className="nb-auth-label">Email</label>
                   <input className="nb-auth-input" name="email" type="email" placeholder="you@yandex.ru" required autoComplete="email" disabled={registerBusy} />
                   <label className="nb-auth-label">Пароль</label>
@@ -275,12 +271,12 @@ export default function AuthModals({
                   onLogin(form, remember);
                 }}
               >
-                <label className="nb-auth-label">Email или имя</label>
+                <label className="nb-auth-label">Email или имя#тег</label>
                 <input
                   className="nb-auth-input"
                   name="username"
                   type="text"
-                  placeholder="you@email.com"
+                  placeholder="you@email.com или nick#1234"
                   required
                   autoComplete="username"
                   autoCapitalize="none"
@@ -389,23 +385,29 @@ export default function AuthModals({
               className="nb-auth-form"
               onSubmit={(e) => {
                 e.preventDefault();
-                onCompleteProfile(profileName.trim());
+                if (profileNick.trim().length < 2 || profileTag.length !== 4) return;
+                onCompleteProfile(`${profileNick.trim()}#${profileTag}`);
               }}
             >
               <label className="nb-auth-label">Email</label>
               <input className="nb-auth-input" value={profileDraft?.email || ""} disabled readOnly />
-              <label className="nb-auth-label">Имя</label>
-              <input
-                className="nb-auth-input"
-                value={profileName}
-                onChange={(e) => setProfileName(e.target.value)}
-                required
-                minLength={3}
-                maxLength={32}
-                autoComplete="username"
+              <label className="nb-auth-label">Имя (ник#тег)</label>
+              <DiscordUsernameField
+                name={null}
+                nick={profileNick}
+                tag={profileTag}
+                onChange={({ nick, tag }) => {
+                  setProfileNick(nick);
+                  setProfileTag(tag);
+                }}
+                idPrefix="profile"
                 autoFocus
               />
-              <button type="submit" className="nb-auth-primary">
+              <button
+                type="submit"
+                className="nb-auth-primary"
+                disabled={profileNick.trim().length < 2 || profileTag.length !== 4}
+              >
                 Продолжить
               </button>
             </form>
