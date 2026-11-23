@@ -1,4 +1,8 @@
-"""Transactional email via Resend SMTP (HTTPS API often blocked from RU VPS)."""
+"""Transactional email via Resend (HTTPS API first; SMTP fallback).
+
+AdminVPS NL blocks outbound SMTP 465/587; RU VPS often timed out on HTTPS.
+Try API first, then SMTP.
+"""
 from __future__ import annotations
 
 import html
@@ -9,9 +13,13 @@ from email.message import EmailMessage
 from typing import Optional
 from urllib.parse import urlparse
 
+import requests
+
 from nano_banana.config import settings
 
 logger = logging.getLogger(__name__)
+
+RESEND_API_URL = "https://api.resend.com/emails"
 
 
 def mail_configured() -> bool:
@@ -53,6 +61,59 @@ def _brand_header_html() -> str:
     )
 
 
+def _send_via_api(
+    *,
+    api_key: str,
+    from_header: str,
+    to_addr: str,
+    subject: str,
+    html_body: str,
+    text: str,
+) -> bool:
+    response = requests.post(
+        RESEND_API_URL,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "from": from_header,
+            "to": [to_addr],
+            "subject": subject,
+            "html": html_body,
+            "text": text,
+        },
+        timeout=20,
+    )
+    if response.status_code < 300:
+        return True
+    detail = (response.text or "")[:240]
+    logger.error("[MAIL] Resend API HTTP %s: %s", response.status_code, detail)
+    return False
+
+
+def _send_via_smtp(
+    *,
+    api_key: str,
+    from_header: str,
+    to_addr: str,
+    subject: str,
+    html_body: str,
+    text: str,
+) -> bool:
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_header
+    msg["To"] = to_addr
+    msg.set_content(text)
+    msg.add_alternative(html_body, subtype="html")
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.resend.com", 465, timeout=12, context=ctx) as smtp:
+        smtp.login("resend", api_key)
+        smtp.send_message(msg)
+    return True
+
+
 def send_email(*, to: str, subject: str, html_body: str, text: Optional[str] = None) -> bool:
     if not mail_configured():
         logger.warning("[MAIL] not configured — skip send to %s (%s)", to, subject)
@@ -60,21 +121,34 @@ def send_email(*, to: str, subject: str, html_body: str, text: Optional[str] = N
 
     api_key = settings.RESEND_API_KEY.strip()
     from_name, from_email = _parse_from(settings.MAIL_FROM)
+    from_header = f"{from_name} <{from_email}>"
     to_addr = to.strip()
+    body_text = text or "Откройте HTML-версию письма."
 
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = f"{from_name} <{from_email}>"
-    msg["To"] = to_addr
-    msg.set_content(text or "Откройте HTML-версию письма.")
-    msg.add_alternative(html_body, subtype="html")
-
-    # Prefer SMTP: api.resend.com HTTPS often times out from RU hosting.
     try:
-        ctx = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.resend.com", 465, timeout=20, context=ctx) as smtp:
-            smtp.login("resend", api_key)
-            smtp.send_message(msg)
+        if _send_via_api(
+            api_key=api_key,
+            from_header=from_header,
+            to_addr=to_addr,
+            subject=subject,
+            html_body=html_body,
+            text=body_text,
+        ):
+            logger.info("[MAIL] sent via Resend API to %s (%s)", to_addr, subject)
+            return True
+    except Exception as exc:
+        logger.warning("[MAIL] Resend API failed: %s: %s", type(exc).__name__, str(exc)[:200])
+
+    try:
+        _send_via_smtp(
+            api_key=api_key,
+            from_header=from_header,
+            to_addr=to_addr,
+            subject=subject,
+            html_body=html_body,
+            text=body_text,
+        )
+        logger.info("[MAIL] sent via Resend SMTP to %s (%s)", to_addr, subject)
         return True
     except Exception as exc:
         logger.error("[MAIL] SMTP send failed: %s: %s", type(exc).__name__, str(exc)[:200])
