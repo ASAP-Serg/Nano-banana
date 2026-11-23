@@ -473,6 +473,11 @@ async def admin_approve_user(
     with db_service.get_session() as session:
         target = _target_user(session, target_user_id)
         _forbid_self(user, target)
+        if not bool(getattr(target, "email_verified", False)):
+            raise HTTPException(
+                status_code=400,
+                detail="Сначала пользователь должен подтвердить email",
+            )
         target.is_approved = True
         _audit_admin_action(
             session=session,
