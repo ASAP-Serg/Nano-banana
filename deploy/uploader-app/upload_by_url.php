@@ -89,7 +89,44 @@ function save_image_bytes(string $bytes, string $mime, string $filesDir, string 
   ];
 }
 
+/** Block SSRF to localhost / RFC1918 / link-local / metadata. */
+function url_is_public_http(string $url): bool {
+  $parts = parse_url($url);
+  if (!is_array($parts)) return false;
+  $scheme = strtolower((string)($parts['scheme'] ?? ''));
+  if ($scheme !== 'http' && $scheme !== 'https') return false;
+  $host = strtolower((string)($parts['host'] ?? ''));
+  if ($host === '' || $host === 'localhost' || str_ends_with($host, '.local') || str_ends_with($host, '.internal')) {
+    return false;
+  }
+  $port = (int)($parts['port'] ?? ($scheme === 'https' ? 443 : 80));
+  if (!in_array($port, [80, 443], true)) {
+    return false;
+  }
+  $ips = [];
+  if (filter_var($host, FILTER_VALIDATE_IP)) {
+    $ips[] = $host;
+  } else {
+    $resolved = @gethostbynamel($host);
+    if (!is_array($resolved) || count($resolved) === 0) return false;
+    $ips = $resolved;
+  }
+  foreach ($ips as $ip) {
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+      return false;
+    }
+    // Extra metadata / IPv6 ULA / link-local
+    if ($ip === '169.254.169.254' || str_starts_with($ip, 'fd') || str_starts_with($ip, 'fe80:')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function curl_fetch(string $url, string $method = 'GET', ?array $postFields = null, int $timeout = 30, int $connectTimeout = 10, int $maxBytes = 0): array {
+  if (!url_is_public_http($url)) {
+    return ['ok' => false, 'error' => 'blocked_url'];
+  }
   $ch = curl_init($url);
   if (!$ch) return ['ok' => false, 'error' => 'curl_init_failed'];
 
@@ -99,7 +136,9 @@ function curl_fetch(string $url, string $method = 'GET', ?array $postFields = nu
   $opts = [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_FOLLOWLOCATION => true,
-    CURLOPT_MAXREDIRS      => 10,
+    CURLOPT_MAXREDIRS      => 5,
+    CURLOPT_PROTOCOLS      => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+    CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
     CURLOPT_TIMEOUT        => $timeout,
     CURLOPT_CONNECTTIMEOUT => $connectTimeout,
     CURLOPT_USERAGENT      => 'UploaderByURL/2.4 (+https://uploader.ooneclickk.ru)',
@@ -459,11 +498,15 @@ ensure_dir($FILES_DIR);
 $token = $_POST['token'] ?? '';
 $src   = $_POST['src'] ?? '';
 
+if ($UPLOAD_TOKEN === '' || strlen($UPLOAD_TOKEN) < 32) {
+  jexit(['error' => 'uploader_misconfigured'], 500);
+}
 if ($token === '' || !hash_equals($UPLOAD_TOKEN, (string)$token)) {
   jexit(['error' => 'bad_token'], 403);
 }
 if ($src === '') jexit(['error' => 'no_src'], 400);
 if (!preg_match('~^https?://~i', $src)) jexit(['error' => 'bad_src'], 400);
+if (!url_is_public_http($src)) jexit(['error' => 'blocked_url'], 400);
 
 // =====================
 // 1) Яндекс: получаем прямой href через Public API

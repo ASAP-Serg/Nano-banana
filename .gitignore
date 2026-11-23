@@ -66,3 +66,6 @@ apps/web/.vite/
 .pytest_cache/
 pytest-cache-files*/
 
+
+# uploader secrets on VPS
+deploy/uploader-app/config.local.php

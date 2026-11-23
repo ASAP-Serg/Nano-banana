@@ -112,6 +112,7 @@ jobs:
               fi
               sudo rsync -a \
                 --exclude 'files/' --exclude 'jobs/' --exclude 'tsum-images/' \
+                --exclude 'config.local.php' \
                 deploy/uploader-app/ /var/www/uploader/
               sudo mkdir -p /var/www/uploader/files /var/www/uploader/jobs
             fi

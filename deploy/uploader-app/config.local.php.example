@@ -1,0 +1,11 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Copy to config.local.php on the VPS (not committed).
+ * Generate: openssl rand -hex 24
+ */
+return [
+    'api_token' => 'REPLACE_WITH_LONG_RANDOM_TOKEN',
+    // 'public_base' => 'https://uploader.ooneclickk.ru',
+];
