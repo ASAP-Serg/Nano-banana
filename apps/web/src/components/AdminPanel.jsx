@@ -296,12 +296,7 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
                   >
                     <td>{u.id}</td>
                     <td>{u.username}</td>
-                    <td>
-                      {u.email}
-                      {!u.email_verified && !u.is_admin && (
-                        <span className="badge text-bg-secondary ms-1">email?</span>
-                      )}
-                    </td>
+                    <td>{u.email}</td>
                     <td>
                       {u.is_superadmin ? "суперадмин" : u.is_admin ? "да" : "нет"}
                     </td>
