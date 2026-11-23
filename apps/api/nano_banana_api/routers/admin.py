@@ -172,6 +172,8 @@ async def admin_list_users(
             session.query(User, stats.c.last_generated_at, stats.c.generation_count)
             .outerjoin(stats, User.id == stats.c.user_id)
         )
+        # Unverified regs are invisible until email confirm (stubs before code entry).
+        query = query.filter(or_(User.is_admin.is_(True), User.email_verified.is_(True)))
         if search:
             needle = f"%{search.strip()}%"
             query = query.filter(or_(User.username.ilike(needle), User.email.ilike(needle)))
