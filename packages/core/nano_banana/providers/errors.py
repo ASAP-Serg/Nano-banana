@@ -359,7 +359,9 @@ CONTENT_POLICY_MARKERS = (
     "safety",
     "moderation",
     "content policy",
+    "content_policy",
     "content filter",
+    "content_filter",
     "blocked",
     "reject",
     "nsfw",
@@ -429,9 +431,9 @@ def is_policy_block_error(message: str) -> bool:
         return True
     if is_content_policy_error(message):
         return True
-    lower = (message or "").lower()
+    lower = (message or "").lower().replace("_", " ")
     return any(
-        marker in lower
+        marker.replace("_", " ") in lower
         for marker in (
             "фильтр контента",
             "контент-фильтр",
@@ -441,8 +443,8 @@ def is_policy_block_error(message: str) -> bool:
             "не прошел фильтр",
             "content filter",
             "content policy",
-            "image_content_policy",
-            "content_policy_violation",
+            "image content policy",
+            "content policy violation",
             "policy violation",
             "responsible ai",
         )
@@ -450,8 +452,9 @@ def is_policy_block_error(message: str) -> bool:
 
 
 def is_content_policy_error(message: str) -> bool:
-    lower = (message or "").lower()
-    return any(marker in lower for marker in CONTENT_POLICY_MARKERS)
+    # Moonez often returns bare codes like "content_policy" (underscore).
+    lower = (message or "").lower().replace("_", " ")
+    return any(marker.replace("_", " ") in lower for marker in CONTENT_POLICY_MARKERS)
 
 
 def humanize_api_error(

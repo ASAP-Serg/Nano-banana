@@ -315,6 +315,12 @@ class TestHumanizeApiError(unittest.TestCase):
         self.assertIn("фильтр безопасности", msg.lower())
         self.assertIn("переформулируйте", msg.lower())
 
+    def test_moonez_bare_content_policy_code(self):
+        # Moonez often returns just "content_policy" — must trigger GPT rewrite path.
+        self.assertTrue(is_content_policy_error("content_policy"))
+        self.assertTrue(is_policy_block_error("content_policy"))
+        self.assertTrue(is_policy_block_error("CONTENT_POLICY"))
+
     def test_openrouter_security_policy(self):
         raw = "OpenRouter: Access denied by security policy."
         self.assertTrue(is_openrouter_security_policy(raw))

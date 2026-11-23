@@ -439,7 +439,10 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 if result.get("paused") or is_bananalab_paused_message(error_message):
                     break
 
-                if rewrite_requested and is_policy_block_error(last_raw_error) and policy_gpt_used < max_policy_gpt:
+                policy_hit = is_policy_block_error(last_raw_error) or is_policy_block_error(
+                    error_message
+                )
+                if rewrite_requested and policy_hit and policy_gpt_used < max_policy_gpt:
                     if not keys.get("openrouter"):
                         if not generation.generation_metadata:
                             generation.generation_metadata = {}
@@ -449,6 +452,13 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                         flag_modified(generation, "generation_metadata")
                         session.commit()
                         break
+                    logger.info(
+                        "[GENERATION] %s policy block — GPT rewrite attempt %s/%s raw=%r",
+                        generation_id,
+                        policy_gpt_used + 1,
+                        max_policy_gpt,
+                        (last_raw_error or "")[:200],
+                    )
                     new_prompt = _try_policy_gpt_rewrite(
                         generation, session, generation_id, prompt_for_generation, error_message, keys
                     )
