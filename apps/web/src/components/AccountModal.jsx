@@ -5,8 +5,10 @@ import DiscordUsernameField, { composeDiscordUsername, splitDiscordUsername } fr
 import Modal from "./Modal.jsx";
 
 export default function AccountModal({ user, onClose, onUsernameChanged, onUserUpdated, onDeleted }) {
-  const [currentPassword, setCurrentPassword] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
+  const [passwordCurrent, setPasswordCurrent] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [usernamePassword, setUsernamePassword] = useState("");
   const initialParts = splitDiscordUsername(user?.username || "");
   const [nick, setNick] = useState(initialParts.nick);
   const [tag, setTag] = useState(initialParts.tag);
@@ -16,17 +18,25 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
   const [transferTo, setTransferTo] = useState("");
   const [adminOptions, setAdminOptions] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [usernameBusy, setUsernameBusy] = useState(false);
+  const [usernameSaved, setUsernameSaved] = useState(false);
+  const [passwordSaved, setPasswordSaved] = useState(false);
+  const [emailSaved, setEmailSaved] = useState(false);
   const hasPassword = user?.has_password !== false;
   const emailOk = Boolean(user?.email_verified) || Boolean(user?.google_linked);
   const isSuper = Boolean(user?.is_superadmin);
+  const composedUsername = composeDiscordUsername(nick, tag);
+  const usernameDirty = composedUsername !== String(user?.username || "").trim();
 
   async function savePassword(e) {
     e.preventDefault();
+    setPasswordSaved(false);
     try {
-      await api.changePassword(currentPassword, newPassword);
-      setCurrentPassword("");
+      await api.changePassword(passwordCurrent, newPassword);
+      setPasswordCurrent("");
       setNewPassword("");
-      toast("Пароль изменён");
+      setPasswordSaved(true);
+      toast("Пароль сохранён");
     } catch (err) {
       toast(err.message, "error");
     }
@@ -34,29 +44,41 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
 
   async function saveUsername(e) {
     e.preventDefault();
-    const username = composeDiscordUsername(nick, tag);
+    setUsernameSaved(false);
     if (nick.trim().length < 2 || tag.length !== 4) {
       toast("Нужен ник и ровно 4 цифры тега", "error");
       return;
     }
+    if (!usernameDirty) {
+      toast("Имя не изменилось", "error");
+      return;
+    }
+    setUsernameBusy(true);
     try {
-      const next = await api.changeUsername(hasPassword ? currentPassword : "", username);
+      const next = await api.changeUsername(hasPassword ? usernamePassword : "", composedUsername);
       onUsernameChanged(next);
-      const parts = splitDiscordUsername(next?.username || username);
+      const parts = splitDiscordUsername(next?.username || composedUsername);
       setNick(parts.nick);
       setTag(parts.tag);
-      toast("Имя изменено");
+      setUsernamePassword("");
+      setUsernameSaved(true);
+      toast("Имя сохранено");
     } catch (err) {
       toast(err.message, "error");
+    } finally {
+      setUsernameBusy(false);
     }
   }
 
   async function saveEmail(e) {
     e.preventDefault();
     setBusy(true);
+    setEmailSaved(false);
     try {
-      const next = await api.updateEmail(email.trim(), hasPassword ? currentPassword : "");
+      const next = await api.updateEmail(email.trim(), hasPassword ? emailPassword : "");
       onUserUpdated?.(next);
+      setEmailPassword("");
+      setEmailSaved(true);
       toast("Письмо с подтверждением отправлено");
     } catch (err) {
       toast(err.message, "error");
@@ -138,49 +160,56 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
         <div className="alert alert-info py-2 small">Аккаунт ждёт подтверждения администратором.</div>
       )}
 
-      <form onSubmit={saveEmail} className="mb-4">
+      <form onSubmit={saveEmail} className="mb-4" autoComplete="off">
         <label className="form-label">Email {emailOk ? "" : "(нужно подтвердить)"}</label>
         {hasPassword && (
           <input
             className="form-control mb-2"
             type="password"
-            autoComplete="current-password"
+            name="nb_email_current_password"
+            autoComplete="off"
             placeholder="Текущий пароль"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
+            value={emailPassword}
+            onChange={(e) => setEmailPassword(e.target.value)}
             required
           />
         )}
         <input
           className="form-control mb-2"
           type="email"
+          name="nb_account_email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
           autoComplete="email"
         />
-        <button className="btn btn-outline-primary" disabled={busy}>
-          Сохранить и отправить подтверждение
-        </button>
+        <div className="d-flex align-items-center gap-2">
+          <button className="btn btn-outline-primary" disabled={busy}>
+            Сохранить и отправить подтверждение
+          </button>
+          {emailSaved ? <span className="small text-success">✓ Сохранено</span> : null}
+        </div>
       </form>
 
       {hasPassword ? (
         <>
           <p className="small text-muted">Текущий пароль — тот, которым входите. Код 2FA сюда не нужен.</p>
-          <form onSubmit={savePassword} className="mb-4">
+          <form onSubmit={savePassword} className="mb-4" autoComplete="off">
             <label className="form-label">Сменить пароль</label>
             <input
               className="form-control mb-2"
               type="password"
-              autoComplete="current-password"
+              name="nb_password_current"
+              autoComplete="off"
               placeholder="Текущий пароль"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
+              value={passwordCurrent}
+              onChange={(e) => setPasswordCurrent(e.target.value)}
               required
             />
             <input
               className="form-control mb-2"
               type="password"
+              name="nb_password_new"
               autoComplete="new-password"
               placeholder="Новый, от 10 символов"
               minLength={10}
@@ -188,22 +217,26 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
               onChange={(e) => setNewPassword(e.target.value)}
               required
             />
-            <button className="btn btn-primary">Сохранить пароль</button>
+            <div className="d-flex align-items-center gap-2">
+              <button className="btn btn-primary">Сохранить пароль</button>
+              {passwordSaved ? <span className="small text-success">✓ Сохранено</span> : null}
+            </div>
           </form>
         </>
       ) : (
         <p className="small text-muted mb-3">Вход только через Google — локального пароля нет.</p>
       )}
-      <form onSubmit={saveUsername} className="mb-4">
+      <form onSubmit={saveUsername} className="mb-4" autoComplete="off">
         <label className="form-label">Сменить имя (ник#тег)</label>
         {hasPassword && (
           <input
             className="form-control mb-2"
             type="password"
-            autoComplete="current-password"
+            name="nb_username_current_password"
+            autoComplete="off"
             placeholder="Текущий пароль"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
+            value={usernamePassword}
+            onChange={(e) => setUsernamePassword(e.target.value)}
             required
           />
         )}
@@ -215,15 +248,28 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
             onChange={({ nick: n, tag: t }) => {
               setNick(n);
               setTag(t);
+              setUsernameSaved(false);
             }}
             className="form-control"
             idPrefix="account"
           />
         </div>
         <p className="small text-muted">Пара ник#тег должна быть свободной (как в Discord).</p>
-        <button className="btn btn-outline-primary" disabled={nick.trim().length < 2 || tag.length !== 4}>
-          Сохранить имя
-        </button>
+        <div className="d-flex align-items-center gap-2 flex-wrap">
+          <button
+            className="btn btn-outline-primary"
+            disabled={
+              usernameBusy ||
+              nick.trim().length < 2 ||
+              tag.length !== 4 ||
+              !usernameDirty ||
+              (hasPassword && !usernamePassword)
+            }
+          >
+            {usernameBusy ? "Сохраняем…" : "Сохранить имя"}
+          </button>
+          {usernameSaved ? <span className="small text-success fw-semibold">✓ Имя сохранено</span> : null}
+        </div>
       </form>
       {user?.totp_enabled && (
         <div className="border-top pt-3 mb-4">
@@ -236,7 +282,7 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
       <div className="border-top pt-3">
         <h6 className="text-danger">Удалить аккаунт</h6>
         <p className="small text-muted">Безвозвратно: профиль, генерации и файлы.</p>
-        <form onSubmit={deleteAccount} onFocus={loadAdminsForTransfer}>
+        <form onSubmit={deleteAccount} onFocus={loadAdminsForTransfer} autoComplete="off">
           {isSuper && (
             <div className="mb-2">
               <label className="form-label small">Передать суперадмина</label>
@@ -259,7 +305,8 @@ export default function AccountModal({ user, onClose, onUsernameChanged, onUserU
             <input
               className="form-control mb-2"
               type="password"
-              autoComplete="current-password"
+              name="nb_delete_current_password"
+              autoComplete="off"
               placeholder="Текущий пароль"
               value={deletePassword}
               onChange={(e) => setDeletePassword(e.target.value)}

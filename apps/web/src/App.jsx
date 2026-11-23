@@ -525,7 +525,7 @@ export default function App() {
           {user.is_approved === false && (
             <div className="container-fluid mt-3">
               <div className="alert alert-info mb-0">
-                Аккаунт на проверке у администратора. Войти можно, генерации откроют после апрува.
+                Email подтверждён. Аккаунт на проверке у администратора — генерации откроют после апрува.
               </div>
             </div>
           )}

@@ -176,8 +176,12 @@ async def admin_list_users(
             needle = f"%{search.strip()}%"
             query = query.filter(or_(User.username.ilike(needle), User.email.ilike(needle)))
         if pending_only:
-            query = query.filter(User.is_admin.is_(False)).filter(
-                or_(User.is_approved.is_(False), User.email_verified.is_(False))
+            # Only after email verify — unverified regs stay out of the approval queue.
+            query = (
+                query.filter(User.is_admin.is_(False))
+                .filter(User.is_active.is_(True))
+                .filter(User.email_verified.is_(True))
+                .filter(User.is_approved.is_(False))
             )
         if idle_only:
             query = query.filter(User.is_admin.is_(False)).filter(
@@ -779,6 +783,7 @@ async def admin_overview(
             session.query(User)
             .filter(User.is_admin.is_(False))
             .filter(User.is_active.is_(True))
+            .filter(User.email_verified.is_(True))
             .filter(User.is_approved.is_(False))
             .count()
         )

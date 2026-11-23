@@ -232,7 +232,7 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
                   }}
                 />
                 <label className="form-check-label" htmlFor="adminPendingOnly">
-                  ждут апрува / email
+                  ждут апрува
                 </label>
               </div>
               <div className="form-check">
@@ -253,7 +253,7 @@ export default function AdminPanel({ onClose, onInsertToForm, currentUser }) {
               </div>
             </div>
             <p className="form-text text-muted mt-0 mb-2">
-              Новые — апрув вручную. Без подтверждённого email 60+ дней без входа — авто-выкл. Удаление вручную или самим юзером.
+              В очереди апрува только после подтверждения email. Без входа 60+ дней — авто-выкл. Удаление вручную или самим юзером.
             </p>
             <div className="table-responsive">
             <table className="table table-sm">

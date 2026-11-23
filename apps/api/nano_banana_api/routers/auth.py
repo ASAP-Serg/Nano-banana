@@ -375,6 +375,14 @@ async def register(
             )
         existing_by_email = session.query(User).filter(User.email == email_norm).first()
         if existing_by_email:
+            if (
+                not bool(getattr(existing_by_email, "email_verified", False))
+                and existing_by_email.hashed_password
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Этот email уже ждёт подтверждения — введите код из письма или нажмите «Отправить код снова».",
+                )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Этот email уже зарегистрирован. Войдите или восстановите пароль.",
@@ -384,11 +392,12 @@ async def register(
             settings.SECURITY_REQUIRE_EMAIL_VERIFY and mail_configured()
         )
         approved = make_admin or not bool(settings.SECURITY_REQUIRE_ADMIN_APPROVAL)
+        # Until email is confirmed the row is inactive: no login/profile, not in admin approve queue.
         new_user = User(
             username=user_data.username,
             email=email_norm,
             hashed_password=hashed_password,
-            is_active=True,
+            is_active=bool(verified),
             is_admin=make_admin,
             is_superadmin=make_admin,
             is_approved=approved,
@@ -418,9 +427,12 @@ async def register(
                 new_user.username,
                 code=code,
             )
-            msg = "Мы отправили код на email. Введите его в форме, чтобы подтвердить аккаунт."
+            msg = (
+                "Мы отправили код на email. Пока код не введён, аккаунт не активен "
+                "(войти и открыть профиль нельзя)."
+            )
             if not approved:
-                msg += " После подтверждения админ откроет доступ к генерациям."
+                msg += " После подтверждения email заявка уйдёт админу на апрув."
             return {
                 "ok": True,
                 "needs_verification": True,
@@ -546,6 +558,7 @@ async def _consume_verify_and_login(token: str, response: Response) -> bool:
         if not user or not user.is_active:
             return False
         user.email_verified = True
+        user.is_active = True
         session.commit()
         session.refresh(user)
         access = await auth_service.create_access_token(user)
@@ -601,12 +614,17 @@ async def verify_email_code(body: VerifyEmailCodeRequest, request: Request, resp
         if not user or not user.is_active:
             raise HTTPException(status_code=400, detail="Неверный код или email")
         if bool(getattr(user, "email_verified", False)):
+            if not user.is_active:
+                user.is_active = True
+                session.commit()
+                session.refresh(user)
             access = await auth_service.create_access_token(user)
             _set_access_cookie(response, access)
             return {"ok": True, "verified": True}
         if not consume_verify_code(session, user.id, body.code):
             raise HTTPException(status_code=400, detail="Неверный или просроченный код")
         user.email_verified = True
+        user.is_active = True
         session.commit()
         session.refresh(user)
         access = await auth_service.create_access_token(user)
@@ -630,7 +648,8 @@ async def resend_verification(body: ResendVerifyRequest, request: Request):
     email = str(body.email).strip().lower()
     with db_service.get_session() as session:
         user = session.query(User).filter(User.email == email).first()
-        if user and user.is_active and not user.email_verified and user.hashed_password:
+        # Allow resend for inactive stubs waiting on first email confirm.
+        if user and user.hashed_password and not user.email_verified:
             code = issue_verify_code(session, user.id, hours=24)
             session.commit()
             send_verify_email(
