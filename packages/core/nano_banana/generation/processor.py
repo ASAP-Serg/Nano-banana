@@ -81,27 +81,40 @@ def rewrite_metadata_fields(metadata: Optional[dict]) -> dict:
     }
 
 
-_PROVIDER_PHASE_LABELS = {
-    "queued": "Ждём Moonez — задача в их очереди",
-    "pending": "Ждём Moonez — задача в их очереди",
-    "processing": "Moonez рисует…",
-    "running": "Moonez рисует…",
-    "in_progress": "Moonez рисует…",
-    "started": "Moonez рисует…",
-    "working": "Moonez рисует…",
-    "done": "Moonez готов, сохраняем…",
-    "completed": "Moonez готов, сохраняем…",
-    "succeeded": "Moonez готов, сохраняем…",
-    "success": "Moonez готов, сохраняем…",
-    "finished": "Moonez готов, сохраняем…",
-    "paused": "Moonez на паузе",
-    "failed": "Moonez вернул ошибку",
-    "error": "Moonez вернул ошибку",
-}
+def _provider_phase_labels(provider: Optional[str]) -> Dict[str, str]:
+    name = {
+        "bananalab": "Moonez",
+        "openrouter": "OpenRouter",
+        "replicate": "Replicate",
+    }.get(provider or "", provider_label(provider) if provider else "Провайдер")
+    return {
+        "queued": f"Ждём {name} — задача в их очереди",
+        "pending": f"Ждём {name} — задача в их очереди",
+        "processing": f"{name} рисует…",
+        "running": f"{name} рисует…",
+        "in_progress": f"{name} рисует…",
+        "started": f"{name} рисует…",
+        "working": f"{name} рисует…",
+        "done": f"{name} готов, сохраняем…",
+        "completed": f"{name} готов, сохраняем…",
+        "succeeded": f"{name} готов, сохраняем…",
+        "success": f"{name} готов, сохраняем…",
+        "finished": f"{name} готов, сохраняем…",
+        "paused": f"{name} на паузе",
+        "failed": f"{name} вернул ошибку",
+        "error": f"{name} вернул ошибку",
+    }
 
 
-def _status_detail_for_phase(phase: str, *, elapsed: float = 0.0) -> str:
-    label = _PROVIDER_PHASE_LABELS.get((phase or "").strip().lower()) or f"Moonez: {phase or '…'}"
+def _status_detail_for_phase(
+    phase: str,
+    *,
+    elapsed: float = 0.0,
+    provider: Optional[str] = None,
+) -> str:
+    labels = _provider_phase_labels(provider)
+    name = labels.get("processing", "Провайдер").split(" ", 1)[0]
+    label = labels.get((phase or "").strip().lower()) or f"{name}: {phase or '…'}"
     if elapsed >= 60:
         mins = int(elapsed // 60)
         return f"{label} ({mins} мин)"
@@ -326,6 +339,7 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 _fail(generation, session, "Нет API ключа для этой модели")
                 return
             provider_label_text = provider_label(provider)
+            generation.generation_metadata["provider"] = provider
             if provider == "bananalab":
                 generation.generation_metadata["status_detail"] = "Отправляем задачу в Moonez…"
             elif provider == "openrouter":
@@ -406,7 +420,7 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                     generation.generation_metadata = {}
                 generation.generation_metadata["provider_phase"] = phase or "unknown"
                 generation.generation_metadata["status_detail"] = _status_detail_for_phase(
-                    phase, elapsed=elapsed
+                    phase, elapsed=elapsed, provider=provider
                 )
                 if job_id:
                     generation.generation_metadata["provider_job_id"] = str(job_id)[:128]
@@ -520,6 +534,10 @@ def _process_locked(generation_id: int, user_id: int, request_data: dict, starte
                 generation.result_path = upload_result["path"]
                 generation.status = "completed"
                 generation.completed_at = datetime.utcnow()
+                generation.generation_metadata["provider"] = provider
+                generation.generation_metadata.pop("status_detail", None)
+                generation.generation_metadata.pop("provider_phase", None)
+                flag_modified(generation, "generation_metadata")
                 session.commit()
                 logger.info(
                     "[GENERATION] %s completed in %.1fs",

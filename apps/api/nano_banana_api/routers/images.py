@@ -319,6 +319,14 @@ async def list_generations(
             # Don't show "Монез готов, сохраняем…" when we already expose /file.
             if result_url and extra.get("persist_pending"):
                 extra["status_detail"] = None
+            if gen.status == "completed":
+                extra["status_detail"] = None
+                extra["provider_phase"] = None
+            estimated = estimate_cost_usd(
+                model_name=model_name,
+                resolution=gen.resolution,
+                reference_count=int(meta.get("reference_images_count") or 0),
+            )
             item = ImageResponse(
                 id=gen.id,
                 user_id=gen.user_id,
@@ -337,12 +345,8 @@ async def list_generations(
                 retry_count=int(meta.get("retry_count", 0) or 0),
                 max_retries=int(meta.get("max_retries", MAX_GENERATION_RETRIES) or MAX_GENERATION_RETRIES),
                 fallback_model=get_fallback_model(model_name),
-                estimated_cost_usd=estimate_cost_usd(
-                    model_name=model_name,
-                    resolution=gen.resolution,
-                    reference_count=int(meta.get("reference_images_count") or 0),
-                ),
                 **extra,
+                estimated_cost_usd=estimated,
             )
             data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
             if data.get("created_at"):
@@ -555,13 +559,16 @@ async def get_generation_full(
             "result_url": client_result_url(generation),
             "status": generation.status,
             "error_message": metadata.get("error"),
+            **rewrite_metadata_fields(metadata),
             "estimated_cost_usd": estimate_cost_usd(
                 model_name=model_name,
                 resolution=generation.resolution,
                 reference_count=int(metadata.get("reference_images_count") or 0),
             ),
-            **rewrite_metadata_fields(metadata),
         }
+        if generation.status == "completed":
+            payload["status_detail"] = None
+            payload["provider_phase"] = None
         return _hide_mosaic_prompt(payload, metadata, user)
 
 

@@ -31,13 +31,15 @@ export function totalDisplayCost(item) {
   if (!item) return null;
   const gpt = Number(item.gpt_rewrite_cost_usd);
   const gptPart = Number.isFinite(gpt) && gpt > 0 ? gpt : 0;
-  const fact = Number(item.provider_cost_usd);
-  if (Number.isFinite(fact)) {
+  const factRaw = item.provider_cost_usd;
+  const fact = factRaw == null || factRaw === "" ? NaN : Number(factRaw);
+  if (Number.isFinite(fact) && fact >= 0) {
     return { amount: fact + gptPart, estimated: false };
   }
   if (item.status === "failed" && gptPart <= 0) return null;
-  const est = Number(item.estimated_cost_usd);
-  if (Number.isFinite(est)) {
+  const estRaw = item.estimated_cost_usd;
+  const est = estRaw == null || estRaw === "" ? NaN : Number(estRaw);
+  if (Number.isFinite(est) && est >= 0) {
     return { amount: est + gptPart, estimated: true };
   }
   if (gptPart > 0) return { amount: gptPart, estimated: false };
