@@ -195,6 +195,13 @@ const GenerateForm = forwardRef(function GenerateForm({
         setRefs(urls.slice(0, MAX_REF_COUNT).map((url) => ({ id: crypto.randomUUID(), dataUrl: url, name: "ref" })));
         setMode(urls.length || gen.generation_mode === "image-to-image" ? "image-to-image" : "text-to-image");
       }
+      // Carry GPT toggles from the reused generation into the form + prefs.
+      const nextEnhance = Boolean(gen.enhance_requested ?? gen.enhance_prompt);
+      const nextRewrite = Boolean(gen.rewrite_requested ?? gen.rewrite_prompt);
+      setEnhance(nextEnhance);
+      setRewrite(nextRewrite);
+      localStorage.setItem("nb_enhance", nextEnhance ? "1" : "0");
+      localStorage.setItem("nb_rewrite", nextRewrite ? "1" : "0");
       toast("Форма заполнена параметрами генерации");
     },
   }));
