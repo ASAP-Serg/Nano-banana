@@ -86,34 +86,40 @@ export default function ParamsModal({ item, onClose }) {
           {item.status_detail ? ` · ${item.status_detail}` : ""}
           {item.provider_phase ? ` (${item.provider_phase})` : ""}
         </p>
-        {item.original_prompt && (
-          <div className="mb-3">
-            <p className="mb-2">
-              <strong>Исходный промпт:</strong>
-            </p>
-            <p className="small mb-0" style={{ background: "rgba(10, 132, 255, 0.08)", padding: "0.75rem", borderRadius: 10 }}>
-              {item.original_prompt}
-            </p>
-          </div>
-        )}
-        <div className="mb-3">
-          <p className="mb-2">
-            <strong>Промпт:</strong>
-          </p>
-          <p className="small mb-0" style={{ background: "rgba(255,255,255,0.04)", padding: "0.75rem", borderRadius: 6 }}>
-            {item.prompt}
-          </p>
-        </div>
-        {item.rewritten_prompt && (
-          <div className="mb-3">
-            <p className="mb-2">
-              <strong>Переписан GPT{item.rewrite_model ? ` · ${item.rewrite_model}` : ""}:</strong>
-            </p>
-            <p className="small mb-0" style={{ background: "rgba(16, 185, 129, 0.12)", padding: "0.75rem", borderRadius: 6 }}>
-              {item.rewritten_prompt}
-            </p>
-          </div>
-        )}
+        {(() => {
+          const original = item.original_prompt || item.prompt || "";
+          const rewritten = item.rewritten_prompt || "";
+          const hasRewrite = Boolean(rewritten && rewritten !== original);
+          return (
+            <>
+              <div className="mb-3">
+                <p className="mb-2">
+                  <strong>{hasRewrite ? "Исходный промпт:" : "Промпт:"}</strong>
+                </p>
+                <p
+                  className="small mb-0"
+                  style={{
+                    background: hasRewrite ? "rgba(10, 132, 255, 0.08)" : "rgba(255,255,255,0.04)",
+                    padding: "0.75rem",
+                    borderRadius: hasRewrite ? 10 : 6,
+                  }}
+                >
+                  {original || "—"}
+                </p>
+              </div>
+              {hasRewrite ? (
+                <div className="mb-3">
+                  <p className="mb-2">
+                    <strong>Переписан GPT{item.rewrite_model ? ` · ${item.rewrite_model}` : ""}:</strong>
+                  </p>
+                  <p className="small mb-0" style={{ background: "rgba(16, 185, 129, 0.12)", padding: "0.75rem", borderRadius: 6 }}>
+                    {rewritten}
+                  </p>
+                </div>
+              ) : null}
+            </>
+          );
+        })()}
         {item.sanitized_prompt && item.sanitized_prompt !== item.prompt && (
           <div className="mb-3">
             <p className="mb-2">

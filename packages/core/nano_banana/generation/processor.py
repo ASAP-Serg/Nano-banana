@@ -207,7 +207,7 @@ def _try_upfront_gpt_enhance(generation, session, prompt: str, keys: dict) -> Op
         _add_gpt_rewrite_cost(generation, rewrite_result)
         generation.generation_metadata.pop("rewrite_error", None)
         generation.generation_metadata.pop("status_detail", None)
-        generation.prompt = enhanced
+        # Keep generation.prompt as the user's original; only metadata holds GPT text.
         flag_modified(generation, "generation_metadata")
         session.commit()
         return enhanced
@@ -245,7 +245,7 @@ def _try_policy_gpt_rewrite(generation, session, generation_id: int, prompt: str
         generation.generation_metadata["rewrite_model"] = rewrite_result.get("model")
         _add_gpt_rewrite_cost(generation, rewrite_result)
         generation.generation_metadata.pop("rewrite_error", None)
-        generation.prompt = rewrite_result["prompt"]
+        # Keep generation.prompt as the user's original; GPT text lives in metadata.
         flag_modified(generation, "generation_metadata")
         session.commit()
         return rewrite_result["prompt"]

@@ -452,7 +452,7 @@ export default function App() {
     try {
       const gen = await api.generation(item.id);
       await onGenerate({
-        prompt: gen.prompt || "",
+        prompt: gen.original_prompt || gen.prompt || "",
         negative_prompt: gen.negative_prompt || null,
         generation_mode: gen.generation_mode || "text-to-image",
         model_name: item.fallback_model,

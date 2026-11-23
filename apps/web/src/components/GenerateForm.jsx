@@ -156,7 +156,8 @@ const GenerateForm = forwardRef(function GenerateForm({
 
   useImperativeHandle(ref, () => ({
     applyGeneration(gen, { modelOverride } = {}) {
-      setPrompt(gen.prompt || "");
+      // Prefer the user's original text — never paste the GPT rewrite into the form.
+      setPrompt(gen.original_prompt || gen.prompt || "");
       setNegative(gen.negative_prompt || "");
       setResolution(gen.resolution || "1K");
       setAspect(gen.aspect_ratio || "1:1");
