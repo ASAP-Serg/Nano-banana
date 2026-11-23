@@ -802,9 +802,9 @@ async def delete_my_account(
 @router.post("/forgot-password")
 async def forgot_password(body: ForgotPasswordRequest, request: Request):
     check_rate_limit(
-        "forgot-password",
+        "forgot-password-ip",
         client_ip_from_request(request),
-        5,
+        8,
         3600,
         "Слишком много запросов. Попробуйте позже.",
     )
@@ -812,6 +812,13 @@ async def forgot_password(body: ForgotPasswordRequest, request: Request):
     if not mail_configured():
         raise HTTPException(status_code=503, detail="Почта не настроена")
     email = str(body.email).strip().lower()
+    check_rate_limit(
+        "forgot-password-email",
+        email,
+        3,
+        3600,
+        "Слишком много запросов для этого email. Попробуйте позже.",
+    )
     with db_service.get_session() as session:
         user = session.query(User).filter(User.email == email).first()
         if user and user.is_active and user.hashed_password:
@@ -1037,9 +1044,9 @@ async def totp_begin(
         db_user.totp_secret = CryptoService.encrypt(secret)
         session.commit()
         uri = pyotp.TOTP(secret).provisioning_uri(name=db_user.username, issuer_name="Nano Banana")
+        # No plaintext secret in JSON — SPA extracts from otpauth_url if needed for manual entry.
         return {
             "otpauth_url": uri,
-            "secret": secret,
             "qr_data_url": otpauth_qr_data_url(uri),
         }
 

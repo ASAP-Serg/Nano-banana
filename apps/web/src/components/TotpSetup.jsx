@@ -16,8 +16,17 @@ export default function TotpSetup({ onClose, onEnabled }) {
       try {
         const data = await api.totpBegin();
         if (cancelled) return;
-        setSecret(data.secret || "");
-        setOtpauth(data.otpauth_url || "");
+        const uri = data.otpauth_url || "";
+        let extracted = data.secret || "";
+        if (!extracted && uri) {
+          try {
+            extracted = new URL(uri).searchParams.get("secret") || "";
+          } catch {
+            extracted = "";
+          }
+        }
+        setSecret(extracted);
+        setOtpauth(uri);
         setQrDataUrl(data.qr_data_url || "");
       } catch (err) {
         if (cancelled) return;
@@ -59,7 +68,7 @@ export default function TotpSetup({ onClose, onEnabled }) {
         Сканируйте QR в Google Authenticator, Authy или другом приложении, затем введите код из 6 цифр.
         Без этого админка недоступна.
       </p>
-      {secret ? (
+      {otpauth || qrDataUrl ? (
         <>
           {qrDataUrl ? (
             <div className="text-center mb-3">
