@@ -72,10 +72,13 @@ function should_upload_url(string $u, bool $forceDirect): bool {
     return is_yandex($u) || is_melon($u) || ($forceDirect && is_direct_image($u));
 }
 
-function upload_one(string $srcUrl): array {
-    $ch = curl_init($UPLOAD_BY_URL);
+function upload_one(string $srcUrl, string $uploadByUrl, string $apiToken): array {
+    if ($uploadByUrl === '' || !preg_match('~^https?://~i', $uploadByUrl)) {
+        return ['ok' => false, 'error' => 'upload_by_url_not_configured'];
+    }
+    $ch = curl_init($uploadByUrl);
     $post = http_build_query([
-        'token' => $API_TOKEN,
+        'token' => $apiToken,
         'src' => $srcUrl,
     ]);
     curl_setopt_array($ch, [
@@ -288,7 +291,7 @@ if ($status !== 'done' && $status !== 'failed') {
     $end = min(count($queue), $cursor + CHUNK_PER_POLL);
     for ($i = $cursor; $i < $end; $i++) {
         $src = (string)$queue[$i];
-        $up = upload_one($src);
+        $up = upload_one($src, $UPLOAD_BY_URL, $API_TOKEN);
         if ($up['ok'] ?? false) {
             $mapping[$src] = $up['data'];
             $cursor = $i + 1;
