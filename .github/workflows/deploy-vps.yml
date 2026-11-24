@@ -124,6 +124,20 @@ jobs:
             sudo find /var/www/uploader -type d -exec chmod 755 {} \;
             sudo find /var/www/uploader -type f -exec chmod 644 {} \;
             sudo chmod 775 /var/www/uploader/files /var/www/uploader/jobs
+            echo "Uploader diag:"
+            sudo grep -n "function upload_one" /var/www/uploader/job_status.php || true
+            sudo sed -n '75,95p' /var/www/uploader/job_status.php || true
+            echo "Recent jobs:"
+            sudo ls -lt /var/www/uploader/jobs/*.json 2>/dev/null | head -8 || true
+            # Show last failed job error summary without dumping whole sheets
+            newest=$(sudo ls -t /var/www/uploader/jobs/job_*.json 2>/dev/null | head -1 || true)
+            if [ -n "$newest" ]; then
+              echo "Newest job file: $newest"
+              sudo php -r '$j=json_decode(file_get_contents($argv[1]),true); echo "status=".($j["status"]??"")." error=".($j["error"]??"")." failedUrl=".substr(($j["failedUrl"]??""),0,120)."
+"; $e=$j["errors"]??[]; echo "errors=".count($e)."
+"; if($e){ $x=end($e); echo "lastErr=".($x["error"]??"")." detail=".substr(($x["detail"]??""),0,200)."
+"; }' "$newest" || true
+            fi
             echo "Uploader tree:"
             ls -la /var/www/uploader | head -30
             ls -la /var/www/uploader/jobs 2>/dev/null | head -20 || true

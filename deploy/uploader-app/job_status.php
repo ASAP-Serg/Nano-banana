@@ -72,35 +72,74 @@ function should_upload_url(string $u, bool $forceDirect): bool {
     return is_yandex($u) || is_melon($u) || ($forceDirect && is_direct_image($u));
 }
 
-function upload_one(string $srcUrl, string $uploadByUrl, string $apiToken): array {
-    if ($uploadByUrl === '' || !preg_match('~^https?://~i', $uploadByUrl)) {
-        return ['ok' => false, 'error' => 'upload_by_url_not_configured'];
-    }
-    $ch = curl_init($uploadByUrl);
+function upload_one_request_(string $endpoint, string $hostHeader, string $srcUrl, string $apiToken, bool $insecureTls = false): array {
+    $ch = curl_init($endpoint);
     $post = http_build_query([
         'token' => $apiToken,
         'src' => $srcUrl,
     ]);
-    curl_setopt_array($ch, [
+    $headers = ['Content-Type: application/x-www-form-urlencoded'];
+    if ($hostHeader !== '') {
+        $headers[] = 'Host: ' . $hostHeader;
+    }
+    $opts = [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $post,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_CONNECTTIMEOUT => 10,
         CURLOPT_TIMEOUT => 120,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
-    ]);
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_FOLLOWLOCATION => true,
+    ];
+    if ($insecureTls) {
+        $opts[CURLOPT_SSL_VERIFYPEER] = false;
+        $opts[CURLOPT_SSL_VERIFYHOST] = 0;
+    }
+    curl_setopt_array($ch, $opts);
     $body = curl_exec($ch);
     $errno = curl_errno($ch);
     $err = curl_error($ch);
     $http = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    return [
+        'body' => (string)$body,
+        'errno' => $errno,
+        'err' => $err,
+        'http' => $http,
+    ];
+}
 
-    if ($errno !== 0) {
-        return ['ok' => false, 'error' => 'curl_' . $errno . ':' . $err];
+function upload_one(string $srcUrl, string $uploadByUrl, string $apiToken): array {
+    if ($uploadByUrl === '' || !preg_match('~^https?://~i', $uploadByUrl)) {
+        return ['ok' => false, 'error' => 'upload_by_url_not_configured'];
     }
-    if ($http !== 200) {
-        return ['ok' => false, 'error' => 'http_' . $http, 'body' => (string)$body];
+
+    // Public HTTPS first; if VPS cannot hairpin to itself, fall back to loopback + Host.
+    $attempts = [[$uploadByUrl, '', false]];
+    $host = parse_url($uploadByUrl, PHP_URL_HOST);
+    if (is_string($host) && $host !== '') {
+        $attempts[] = ['https://127.0.0.1/upload_by_url.php', $host, true];
     }
+
+    $last = ['errno' => 0, 'err' => '', 'http' => 0, 'body' => ''];
+    foreach ($attempts as [$endpoint, $hostHeader, $insecureTls]) {
+        $last = upload_one_request_($endpoint, $hostHeader, $srcUrl, $apiToken, $insecureTls);
+        if ($last['errno'] === 0 && $last['http'] === 200) {
+            break;
+        }
+        // Only fall back on transport / empty-url style failures.
+        if ($last['errno'] === 0 && $last['http'] > 0 && $last['http'] !== 200) {
+            break;
+        }
+    }
+
+    if ($last['errno'] !== 0) {
+        return ['ok' => false, 'error' => 'curl_' . $last['errno'] . ':' . $last['err']];
+    }
+    if ($last['http'] !== 200) {
+        return ['ok' => false, 'error' => 'http_' . $last['http'], 'body' => $last['body']];
+    }
+    $body = $last['body'];
 
     $j = parse_json((string)$body);
     if (!$j) return ['ok' => false, 'error' => 'bad_json', 'body' => (string)$body];
@@ -387,5 +426,6 @@ out([
     'status' => $job['status'],
     'progress' => $job['progress'] ?? ['done' => 0, 'total' => 0, 'message' => 'unknown'],
     'error' => $job['error'] ?? null,
+    'failedUrl' => $job['failedUrl'] ?? null,
     'result' => $job['status'] === 'done' ? $result : null,
 ]);
